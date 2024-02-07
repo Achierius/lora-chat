@@ -9,9 +9,8 @@
 #include <linux/spi/spi.h>
 
 #include "lora-chat/ioctls.h"
+#include "lora-chat/device_info.h"
 
-#define DEVICE_NAME "dumb-loopback-0"
-#define CLASS_NAME "dumb-loopback"
 #define BUFFER_SIZE 1024
 
 static int major_number = -1;
@@ -167,21 +166,21 @@ const static struct file_operations fops =
 };
 
 static int __init loopback_init(void) {
-  major_number = register_chrdev(0, DEVICE_NAME, &fops);
+  major_number = register_chrdev(0, LORACHAT_DEVICE_NAME, &fops);
   if (major_number < 0) {
     printk(KERN_ALERT "dumb_loopback: Failed to register a major number\n");
     return major_number;
   }
-  loopback_class = class_create(THIS_MODULE, CLASS_NAME);
+  loopback_class = class_create(THIS_MODULE, LORACHAT_CLASS_NAME);
   if (IS_ERR(loopback_class)) {
-    unregister_chrdev(major_number, DEVICE_NAME);
+    unregister_chrdev(major_number, LORACHAT_DEVICE_NAME);
     printk(KERN_ALERT "dumb_loopback: Failed to register device class\n");
     return PTR_ERR(loopback_class);
   }
-  loopback_device = device_create(loopback_class, NULL, MKDEV(major_number, 0), NULL, DEVICE_NAME);
+  loopback_device = device_create(loopback_class, NULL, MKDEV(major_number, 0), NULL, LORACHAT_DEVICE_NAME);
   if (IS_ERR(loopback_device)) {
     class_destroy(loopback_class);
-    unregister_chrdev(major_number, DEVICE_NAME);
+    unregister_chrdev(major_number, LORACHAT_DEVICE_NAME);
     printk(KERN_ALERT "dumb_loopback: Failed to create the device\n");
     return PTR_ERR(loopback_device);
   }
@@ -194,7 +193,7 @@ static void __exit loopback_exit(void) {
   device_destroy(loopback_class, MKDEV(major_number, 0));
   class_unregister(loopback_class);
   class_destroy(loopback_class);
-  unregister_chrdev(major_number, DEVICE_NAME);
+  unregister_chrdev(major_number, LORACHAT_DEVICE_NAME);
   printk(KERN_INFO "dumb_loopback: Unregistered successfully\n");
 }
 
