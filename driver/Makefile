@@ -1,4 +1,4 @@
-obj-m     += src/dumb_loopback.o
+obj-m     += src/lc_spi.o
 ccflags-y += -I$(src)/include
 
 all:
