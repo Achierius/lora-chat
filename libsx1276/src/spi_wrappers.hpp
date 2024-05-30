@@ -41,13 +41,12 @@ inline int spi_init() {
   return fd;
 }
 
-
 inline std::pair<int, uint8_t> spi_read_byte(int fd, uint8_t addr) {
   uint8_t tx[] = {addr, 0x00};
   uint8_t rx[2] = {0, 0};  // Response buffer
   struct spi_ioc_transfer tr = {
-    .tx_buf = reinterpret_cast<unsigned long>tx,
-    .rx_buf = reinterpret_cast<unsigned long>rx,
+    .tx_buf = reinterpret_cast<unsigned long>(tx),
+    .rx_buf = reinterpret_cast<unsigned long>(rx),
     .len = 2,
     .speed_hz = kSpiSpeed,
     .delay_usecs = 0,
@@ -62,8 +61,8 @@ inline std::pair<int, uint8_t> spi_write_byte(int fd, uint8_t addr, uint8_t val)
   uint8_t tx[] = {(uint8_t)(addr | 0x80), val};
   uint8_t rx[2] = {0, 0};  // Response buffer
   struct spi_ioc_transfer tr = {
-    .tx_buf = reinterpret_cast<unsigned long>tx,
-    .rx_buf = reinterpret_cast<unsigned long>rx,
+    .tx_buf = reinterpret_cast<unsigned long>(tx),
+    .rx_buf = reinterpret_cast<unsigned long>(rx),
     .len = 2,
     .speed_hz = kSpiSpeed,
     .delay_usecs = 0,

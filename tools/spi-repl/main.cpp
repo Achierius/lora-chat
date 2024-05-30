@@ -14,7 +14,7 @@
 #include <sys/ioctl.h>
 #include <linux/spi/spidev.h>
 
-#include "sx1276.hpp"
+#include "sx1276/sx1276.hpp"
 
 constexpr size_t kFifoMaxCapacity = 66;
 constexpr size_t kMaxSpiAddress = 0x70;

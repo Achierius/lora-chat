@@ -5,12 +5,10 @@
 #include <cassert>
 #include <cstdio>
 
-void Sx127x::init_lora(int fd, uint32_t freq, Sx127x::Bandwidth bw,
-    Sx127x::CodingRate cr, int spreading_factor) {
-  using RegAddr = Sx127x::RegAddr;
-  using OpMode = Sx127x::OpMode;
-  using Bandwidth = Sx127x::Bandwidth;
-  using CodingRate = Sx127x::CodingRate;
+void sx1276::init_lora(int fd, uint32_t freq, sx1276::Bandwidth bw,
+    sx1276::CodingRate cr, SpreadingFactor spreading_factor) {
+  using RegAddr = sx1276::RegAddr;
+  using OpMode = sx1276::OpMode;
 
   assert(spreading_factor >= 6 && spreading_factor <= 12);
   if (spreading_factor == 6) {
@@ -123,12 +121,12 @@ void Sx127x::init_lora(int fd, uint32_t freq, Sx127x::Bandwidth bw,
   }
 }
 
-void Sx127x::lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int len) {
+void sx1276::lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int len) {
   assert(len > 0);
   assert(len < 0xffff);
   assert(msg);
 
-  using RegAddr = Sx127x::RegAddr;
+  using RegAddr = sx1276::RegAddr;
 
   // TODO compute TOA from message length
   uint64_t time_on_air_us = time_on_air_ms * 1000;

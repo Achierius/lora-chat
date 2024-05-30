@@ -2,14 +2,14 @@
 
 #include "spi_wrappers.hpp"
 #include "sx1276_lora_registers.hpp"
+#include "types.hpp"
 
-namespace Sx127x {
+namespace sx1276 {
 
-// TODO make an enum for spreading factor
-void init_lora(int fd, uint32_t freq, Sx127x::Bandwidth bw, Sx127x::CodingRate
-    cr, int spreading_factor);
+void init_lora(int fd, Frequency freq, Bandwidth bw, CodingRate cr,
+    SpreadingFactor sf);
 
 // TODO propogate errors
 void lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int len);
 
-} // namespace Sx127x
+} // namespace sx1276
