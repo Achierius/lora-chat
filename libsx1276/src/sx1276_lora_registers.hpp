@@ -47,6 +47,8 @@
 #define SX127x_REG_HBW_OPTIMIZE2 0x3A
 #define SX127x_REG_INVERT_IQ2 0x3B
 
+#define SX127x_FIFO_CAPACITY 66
+
 #ifdef __cplusplus
 namespace sx1276 {
 #endif // __cplusplus
