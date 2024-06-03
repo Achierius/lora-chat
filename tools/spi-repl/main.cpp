@@ -69,13 +69,13 @@ void burst_read_from_spi_cmd(int fd, uint8_t addr, int len) {
 
 void hardcoded_init_for_transmit_cmd(int fd) {
   printf("Setting up device...\n");
-  Sx127x::init_lora(fd, 0xe4c000, Sx127x::Bandwidth::k125kHz, Sx127x::CodingRate::k4_7, 9);
+  sx1276::init_lora(fd, 0xe4c000, sx1276::Bandwidth::k125kHz, sx1276::CodingRate::k4_7, 9);
   printf("Setup complete!\n");
 }
 
 void transmit_iota_cmd(int fd, int ms, int val) {
   printf("Transmitting...\n");
-  using RegAddr = Sx127x::RegAddr;
+  using RegAddr = sx1276::RegAddr;
 
   spi_write_byte(fd, RegAddr::kOpMode, 0x89);
   spi_write_byte(fd, RegAddr::kPreambleMsb, 0x00);
@@ -108,7 +108,7 @@ void transmit_cmd(int fd, int ms, const uint8_t* msg, int len) {
   assert(len <= kFifoMaxCapacity);
 
   printf("Transmitting (len %d)...\n", len);
-  Sx127x::lora_transmit(fd, ms, msg, len);
+  sx1276::lora_transmit(fd, ms, msg, len);
   printf("Transmitted message %.*s\n", len, msg);
 }
 

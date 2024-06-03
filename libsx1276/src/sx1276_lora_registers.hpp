@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef __ASSEMBLER__
+#include <cstdint>
+#endif // __ASSEMBLER__
+
 #define SX127x_REG_FIFO 0x00
 #define SX127x_REG_OP_MODE 0x01
 #define SX127x_REG_FREQ_MSB 0x06
@@ -39,6 +43,8 @@
 #define SX127x_REG_FEI_MID 0x29
 #define SX127x_REG_FEI_LSB 0x2A
 #define SX127x_REG_RSSI_WIDEBAND 0x2C
+#define SX127x_REG_IF_FREQ_1 0x2f
+#define SX127x_REG_IF_FREQ_2 0x30
 #define SX127x_REG_DETECT_OPTIMIZE 0x31
 #define SX127x_REG_INVERT_IQ 0x33
 #define SX127x_REG_HBW_OPTIMIZE1 0x36
@@ -49,9 +55,21 @@
 
 #define SX127x_FIFO_CAPACITY 66
 
+#ifndef __ASSEMBLER__
 #ifdef __cplusplus
 namespace sx1276 {
 #endif // __cplusplus
+
+struct IrqFlags {
+  uint8_t rx_timeout : 1;
+  uint8_t rx_done : 1;
+  uint8_t payload_crc_error : 1;
+  uint8_t valid_header : 1;
+  uint8_t tx_done : 1;
+  uint8_t cad_done : 1;
+  uint8_t fhss_change_channel : 1;
+  uint8_t cad_detected : 1;
+};
 
 enum RegAddr : uint8_t {
   kFifo = 0x00,
@@ -93,6 +111,8 @@ enum RegAddr : uint8_t {
   kFeiMid = 0x29,
   kFeiLsb = 0x2A,
   kRssiWideband = 0x2C,
+  kIfFreq1 = 0x2f,
+  kIfFreq2 = 0x30,
   kDetectOptimize = 0x31,
   kInvertIq = 0x33,
   kHbwOptimize1 = 0x36,
@@ -105,4 +125,4 @@ enum RegAddr : uint8_t {
 #ifdef __cplusplus
 } // namespace sx1276
 #endif // __cplusplus
-
+#endif // __ASSEMBLER__

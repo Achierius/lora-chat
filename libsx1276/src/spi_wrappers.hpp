@@ -16,6 +16,8 @@
 #include <sys/ioctl.h>
 #include <linux/spi/spidev.h>
 
+constexpr bool kSpiWrapperLogRw = 0;
+
 constexpr size_t kSpiMode = SPI_MODE_0;
 constexpr size_t kSpiBits = 8;
 constexpr size_t kSpiSpeed = 1000000;
@@ -53,12 +55,16 @@ inline std::pair<int, uint8_t> spi_read_byte(int fd, uint8_t addr) {
     .bits_per_word = kSpiBits,
   };
 
+
   int status = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+  if constexpr (kSpiWrapperLogRw) {
+    printf("*** reading 0x%02x from 0x%02x\n", rx[1], addr);
+  }
   return {status, rx[1]};  // the value read out is in the second byte
 }
 
 inline std::pair<int, uint8_t> spi_write_byte(int fd, uint8_t addr, uint8_t val) {
-  uint8_t tx[] = {(uint8_t)(addr | 0x80), val};
+  uint8_t tx[] = {static_cast<uint8_t>(addr | 0x80), val};
   uint8_t rx[2] = {0, 0};  // Response buffer
   struct spi_ioc_transfer tr = {
     .tx_buf = reinterpret_cast<unsigned long>(tx),
@@ -69,7 +75,11 @@ inline std::pair<int, uint8_t> spi_write_byte(int fd, uint8_t addr, uint8_t val)
     .bits_per_word = kSpiBits,
   };
 
+
   int status = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+  if constexpr (kSpiWrapperLogRw) {
+    printf("*** writing 0x%02x  to  0x%02x\n", val, addr);
+  }
   return {status, rx[1]};
 }
 

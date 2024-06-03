@@ -1,4 +1,5 @@
 #include "radio_operations.hpp"
+#include "spi_wrappers.hpp"
 
 #include <utility>
 
@@ -16,7 +17,6 @@ void sx1276::init_lora(int fd, uint32_t freq, sx1276::Bandwidth bw,
     exit(-1);
   }
     
-
   auto check = [](std::pair<int, uint8_t> result) -> uint8_t {
     auto& [status, response] = result;
     if (status < 0) {
@@ -53,6 +53,13 @@ void sx1276::init_lora(int fd, uint32_t freq, sx1276::Bandwidth bw,
     // Errata says we need to turn off this bit after reset
     check(spi_unset_bit(fd, RegAddr::kDetectOptimize, 7));
     fence(RegAddr::kDetectOptimize);
+    // Doing so resets the IfFreq registers, so we now reconfigure them
+    // to the values that radiolib uses
+    check(spi_write_byte(fd, RegAddr::kIfFreq1, 0x40));
+    fence(RegAddr::kIfFreq1);
+    check(spi_write_byte(fd, RegAddr::kIfFreq2, 0x00));
+    fence(RegAddr::kIfFreq2);
+
     // Overload current protection
     check(spi_write_byte(fd, RegAddr::kOcp, 0x23));
     fence(RegAddr::kOcp);
@@ -87,8 +94,8 @@ void sx1276::init_lora(int fd, uint32_t freq, sx1276::Bandwidth bw,
   // Configure IQ inversions??
   {
     // bit 0 is TX invert, bit 6 is RX invert
-    uint8_t iq_inversions = (1 << 6) | (1 << 0);  // Radiolib doesn't set bit 6
-                                                  // when just transmitting, idk
+    uint8_t iq_inversions = (0 << 6) | (1 << 0);  // Radiolib doesn't set bit 6
+                                                  // And if I do it doesn't work
     uint8_t mask = (1 << 6) | (1 << 0);
     check(spi_write_byte_masked(fd, RegAddr::kInvertIq, iq_inversions, mask));
     fence(RegAddr::kInvertIq);
@@ -115,8 +122,9 @@ void sx1276::init_lora(int fd, uint32_t freq, sx1276::Bandwidth bw,
     fence(RegAddr::kModemConfig1);
 
     // Spreading factor & some other bits ig
-    uint8_t rx_payload_crc = (1 << 2);
-    check(spi_write_byte(fd, RegAddr::kModemConfig2, (spreading_factor << 4) | rx_payload_crc));
+    uint8_t rx_payload_crc = (0 << 2);
+    uint8_t up_rx_symb_timeout = 1;
+    check(spi_write_byte(fd, RegAddr::kModemConfig2, (spreading_factor << 4) | rx_payload_crc | up_rx_symb_timeout));
     fence(RegAddr::kModemConfig2);
   }
 }
@@ -148,4 +156,55 @@ void sx1276::lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int l
   spi_write_byte(fd, 0x01, 0x8b);
   usleep(time_on_air_us);
   spi_write_byte(fd, 0x01, 0x89);
+}
+
+bool sx1276::lora_receive(int fd, int time_on_air_ms, uint8_t* dest, int max_len) {
+  assert(max_len);
+  assert(dest);
+
+  using RegAddr = sx1276::RegAddr;
+
+  // TODO compute TOA from message length
+  uint64_t time_on_air_us = time_on_air_ms * 1000;
+
+  // TODO error handle every single write :')
+
+  spi_write_byte(fd, RegAddr::kOpMode, 0x89);
+  spi_write_byte(fd, RegAddr::kPreambleMsb, 0x00);
+  spi_write_byte(fd, RegAddr::kPreambleLsb, 0x08);
+  spi_write_byte(fd, RegAddr::kHopPeriod, 0x00);
+
+  spi_write_byte(fd, RegAddr::kIrqFlags, 0xff);  // clear interrupts
+  spi_write_byte(fd, RegAddr::kFifoRxBaseAddr, 0x00);
+  spi_write_byte(fd, RegAddr::kFifoAddrPtr, 0x00);
+  spi_read_byte(fd, RegAddr::kIrqFlags);
+  spi_read_byte(fd, RegAddr::kFifoRxBaseAddr);
+  spi_read_byte(fd, RegAddr::kFifoAddrPtr);
+
+  spi_write_byte(fd, 0x01, 0x8e);
+  usleep(time_on_air_us);
+  spi_write_byte(fd, 0x01, 0x89);
+
+  // TODO what's wrong with my bitfield man
+  //sx1276::IrqFlags irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
+  //if (!irqs.rx_done) {
+
+  uint8_t irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
+  if (!(irqs & 0x40)) {
+    // TODO differentiate between a true radio-side timeout and our timeout
+    return false;
+  }
+
+  size_t payload_len { spi_read_byte(fd, RegAddr::kRxNumBytes).second };
+  fflush(stdout);
+  if (payload_len > max_len) {
+    printf("warning: payload len %lu exceeded buffer size %d -- truncating\n", payload_len, max_len);
+    payload_len = max_len;
+  }
+
+  auto [burst_status, burst_result] = spi_read_burst(fd, RegAddr::kFifo, payload_len);
+  //if (burst_status) return false;
+  std::memcpy(dest, burst_result.data(), burst_result.size());
+
+  return true;
 }
