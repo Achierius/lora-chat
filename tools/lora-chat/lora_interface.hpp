@@ -1,13 +1,24 @@
 #pragma once
 
+#include <optional>
+#include <string>
+#include <utility>
+
 #include "config.hpp"
 
-enum class LoraStatus {
-  kOk,
+bool init_lora(Config const& cfg);
+
+enum class TransmitStatus {
+  kSuccess,
   kUnspecifiedError,
   kBadInput,
 };
+TransmitStatus lora_transmit(const char* msg, size_t msg_len);
 
-LoraStatus init_lora(Config const& cfg);
-
-LoraStatus lora_transmit(const char* msg, size_t msg_len);
+enum class ReceiveStatus {
+  kSuccess,
+  kUnspecifiedError,
+  kBadInput,
+  kNoMessage,
+};
+std::pair<ReceiveStatus, std::optional<std::string>> lora_receive(int pend_time_ms);
