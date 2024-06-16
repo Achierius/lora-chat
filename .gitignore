@@ -1,5 +1,7 @@
-# Meson build directory
+# Build artifacts
 build/
+compile_commands.json
+.cache/
 
 # Prerequisites
 *.d
