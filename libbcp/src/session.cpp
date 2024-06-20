@@ -8,6 +8,9 @@
 
 namespace lora_chat {
 
+Session::Clock::Clock(TimePoint start_time, Duration transmission_duration, Duration gap_duration)
+  : start_time_(start_time), transmission_duration_(transmission_duration), gap_duration_(gap_duration) {}
+
 Session::Duration Session::Clock::ElapsedTimeInPeriod(Session::TimePoint t) const {
   return (t - start_time_) % TransmissionPeriod();
 }
@@ -97,9 +100,12 @@ AgentAction Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_stat
   }
 
   // Decide what to transmit
-  if (last_recv_sn_ == last_sent_sn_ + 1) {
+  // this is what we would expect the sn to be if we got a message during the
+  // last receive sequence
+  SequenceNumber expected_recv_sn = we_initiated_ ? last_sent_sn_ : last_sent_sn_ + 1;
+  if (last_recv_sn_ == expected_recv_sn) {
     return AgentAction::kTransmitNextMessage;
-  } else if (last_recv_sn_ == last_sent_sn_ - 1) {
+  } else if (last_recv_sn_ == expected_recv_sn - 1) {
     // We received no messages since our last transmission, NACK so that
     // the counterparty retransmits
     return AgentAction::kTransmitNack;
@@ -111,7 +117,7 @@ AgentAction Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_stat
 }
 
 TransmissionState Session::LocalizeActionKind(TransmissionState initiator_action_kind) const {
-  if (we_initiated_) {
+  if (!we_initiated_) {
     switch (initiator_action_kind) {
     case TransmissionState::kInactive:
       return TransmissionState::kInactive;

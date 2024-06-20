@@ -30,7 +30,7 @@ public:
   using Id = uint16_t;
   using TimePoint = std::chrono::steady_clock::time_point;
   using Duration = std::chrono::steady_clock::duration;
-  static constexpr Duration kHandshakeLeadTime { std::chrono::microseconds(1'000'000) };
+  static constexpr Duration kHandshakeLeadTime { std::chrono::microseconds(100'000) };
 
 private:
   // Each session is tied to an implicit clock which is synchronized between the
@@ -110,6 +110,14 @@ public:
   /// Returns the action to take upon waking.
   AgentAction SleepUntilEndOfGapTime() const;
 
+  void MarkMessageReceipt(SequenceNumber sn) {
+    last_recv_sn_ = sn;
+  }
+  void MarkMessageSend(bool retransmit) {
+    // ignore nacks ig
+    if (!retransmit) last_sent_sn_++;
+  }
+
 private:
   constexpr static SequenceNumber kInitialSn {std::numeric_limits<SequenceNumber>::max()};
 
@@ -128,9 +136,8 @@ private:
 
   Clock clock_;
 
-  SequenceNumber last_recv_sn_ {kInitialSn - 1};
+  SequenceNumber last_recv_sn_ {kInitialSn};
   SequenceNumber last_sent_sn_ {kInitialSn};
-  SequenceNumber last_acked_sent_sn {kInitialSn - 3};
 
   uint64_t messages_sent_ {0};
 
