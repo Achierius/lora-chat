@@ -1,5 +1,6 @@
 bcp_sources = [
   'session.cpp',
+  'radio_interface.cpp',
 ]
 
 bcp_unittests = [
