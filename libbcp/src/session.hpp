@@ -1,9 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <limits>
 
-#include <cstdint>
+#include "packet.hpp"
 
 namespace lora_chat {
 
@@ -22,12 +23,10 @@ enum class AgentAction {
 };
 
 using WireSessionTime = uint64_t;
-using SequenceNumber = uint8_t; // bluetooth uses 1 bit, but how does that
-                                // handle time-delayed reflections?
 
 class Session {
 public:
-  using Id = uint16_t;
+  using Id = WireSessionId;
   using TimePoint = std::chrono::steady_clock::time_point;
   using Duration = std::chrono::steady_clock::duration;
   static constexpr Duration kHandshakeLeadTime { std::chrono::microseconds(100'000) };
