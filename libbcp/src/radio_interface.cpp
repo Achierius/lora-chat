@@ -29,7 +29,7 @@ RadioInterface::Status LoraInterface::Receive(std::span<uint8_t> buffer_out) {
   // TODO TOA calculation should live inside the lora library
   constexpr int kTimeOnAir = 150 + (7 * SX127x_FIFO_CAPACITY);
 
-  bool success = sx1276::lora_receive(fd_, kTimeOnAir, &buffer_out[0], SX127x_FIFO_CAPACITY);
+  bool success = sx1276::lora_receive_single(fd_, kTimeOnAir, &buffer_out[0], SX127x_FIFO_CAPACITY);
   // TODO should actually check for whether we got a timeout or something else
   return success ? Status::kSuccess : Status::kTimeout;
 }

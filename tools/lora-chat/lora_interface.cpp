@@ -51,7 +51,7 @@ std::pair<ReceiveStatus, std::optional<std::string>> lora_receive(int pend_time_
     return {ReceiveStatus::kUnspecifiedError, {}};
 
   std::array<uint8_t, SX127x_FIFO_CAPACITY> buff{0};
-  auto got_msg = sx1276::lora_receive(lora_state->fd, pend_time_ms, buff.data(),
+  auto got_msg = sx1276::lora_receive_continuous(lora_state->fd, pend_time_ms, buff.data(),
                                       SX127x_FIFO_CAPACITY);
   if (got_msg) {
     std::string str(buff.begin(), buff.end());

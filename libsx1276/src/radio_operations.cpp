@@ -149,23 +149,18 @@ void sx1276::lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int l
   spi_write_byte(fd, RegAddr::kPayloadLength, len);
 
   spi_write_byte(fd, RegAddr::kIrqFlags, 0xff);  // clear interrupts
-  spi_write_byte(fd, RegAddr::kFifoTxBaseAddr, 0x00);
-  spi_write_byte(fd, RegAddr::kFifoAddrPtr, 0x00);
+  spi_write_byte(fd, RegAddr::kFifoTxBaseAddr, 0x80);
+  spi_write_byte(fd, RegAddr::kFifoAddrPtr, 0x80);
 
-  spi_write_burst(fd, 0x00, msg, len);
-  spi_write_byte(fd, 0x01, 0x8b);
+  spi_write_burst(fd, RegAddr::kFifo, msg, len);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x8b);
   usleep(time_on_air_us);
-  spi_write_byte(fd, 0x01, 0x89);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x89);
 }
 
-bool sx1276::lora_receive(int fd, int time_on_air_ms, uint8_t* dest, int max_len) {
-  assert(max_len);
-  assert(dest);
-
+namespace {
+bool lora_receive_common_setup(int fd) {
   using RegAddr = sx1276::RegAddr;
-
-  // TODO compute TOA from message length
-  uint64_t time_on_air_us = time_on_air_ms * 1000;
 
   // TODO error handle every single write :')
 
@@ -174,37 +169,120 @@ bool sx1276::lora_receive(int fd, int time_on_air_ms, uint8_t* dest, int max_len
   spi_write_byte(fd, RegAddr::kPreambleLsb, 0x08);
   spi_write_byte(fd, RegAddr::kHopPeriod, 0x00);
 
-  spi_write_byte(fd, RegAddr::kIrqFlags, 0xff);  // clear interrupts
   spi_write_byte(fd, RegAddr::kFifoRxBaseAddr, 0x00);
   spi_write_byte(fd, RegAddr::kFifoAddrPtr, 0x00);
-  spi_read_byte(fd, RegAddr::kIrqFlags);
-  spi_read_byte(fd, RegAddr::kFifoRxBaseAddr);
-  spi_read_byte(fd, RegAddr::kFifoAddrPtr);
+  spi_write_byte(fd, RegAddr::kIrqFlags, 0xff);  // clear interrupts
 
-  spi_write_byte(fd, 0x01, 0x8e);
-  usleep(time_on_air_us);
-  spi_write_byte(fd, 0x01, 0x89);
+  return true;
+}
 
-  // TODO what's wrong with my bitfield man
-  //sx1276::IrqFlags irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
-  //if (!irqs.rx_done) {
-
-  uint8_t irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
-  if (!(irqs & 0x40)) {
-    // TODO differentiate between a true radio-side timeout and our timeout
-    return false;
-  }
+bool copy_received_message(int fd, uint8_t* dest, int max_len) {
+  using RegAddr = sx1276::RegAddr;
 
   size_t payload_len { spi_read_byte(fd, RegAddr::kRxNumBytes).second };
-  fflush(stdout);
+  printf("received payload of length %lu: ", payload_len);
   if (payload_len > max_len) {
     printf("warning: payload len %lu exceeded buffer size %d -- truncating\n", payload_len, max_len);
     payload_len = max_len;
   }
 
   auto [burst_status, burst_result] = spi_read_burst(fd, RegAddr::kFifo, payload_len);
-  //if (burst_status) return false;
-  std::memcpy(dest, burst_result.data(), burst_result.size());
+  // TODO handle the case where we read too few bytes
+  if (burst_status < 0) {
+    printf("SPI burst-read failed: %s\n", strerror(-burst_status));
+    return false;
+  }
+
+  // We ignore the first byte because it's duplicated for whatever reason
+  std::memcpy(dest, burst_result.data() + 1, burst_result.size());
+
+  return true;
+}
+} // namespace
+
+bool sx1276::lora_receive_continuous(int fd, int time_on_air_ms, uint8_t* dest, int max_len) {
+  assert(max_len);
+  assert(dest);
+  using RegAddr = sx1276::RegAddr;
+
+  {
+    auto result = lora_receive_common_setup(fd);
+    if (!result) return result;
+  }
+
+  // If an RxDone interrupt is received in continuous mode, the chip enters an
+  // unstable state (?) wherein any write to the IrqFlags register will drop the
+  // whole chip into FSK FrequencySynthesis mode (OpMode 0x0c) and seemingly
+  // lock it there until reset.
+  // We get around this by masking off the RxDone interrupt and watching the
+  // ValidHeader interrupt instead.
+  // Unfortunately this means that we can't tell when the packet we received
+  // was cut off midway -- TODO investigate further. If needed handle at the
+  // protocol layer.
+  uint8_t irq_mask { spi_read_byte(fd, RegAddr::kIrqFlagsMask).second };
+  spi_write_byte(fd, RegAddr::kIrqFlagsMask, irq_mask | 0x40); // lol
+
+  spi_write_byte(fd, RegAddr::kOpMode, 0x8d);
+  usleep(time_on_air_ms * 1000);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x89);
+
+  spi_write_byte(fd, RegAddr::kIrqFlagsMask, irq_mask); // restore prior state
+  uint8_t irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
+  spi_write_byte(fd, RegAddr::kIrqFlags, 0x10 | 0x20);
+  if (!(irqs & 0x10)) {
+    return false;
+  }
+  // Check for CRC error
+  if (irqs & 0x20) {
+    printf("error: crc error detected\n");
+    return false;
+  }
+
+  {
+    auto result = copy_received_message(fd, dest, max_len);
+    if (!result) return result;
+  }
+
+  return true;
+}
+
+bool sx1276::lora_receive_single(int fd, int time_on_air_ms, uint8_t* dest, int max_len) {
+  assert(max_len);
+  assert(dest);
+  using RegAddr = sx1276::RegAddr;
+
+  {
+    auto result = lora_receive_common_setup(fd);
+    if (!result) return result;
+  }
+
+  // TODO set timeout regs according to time_on_air_ms
+
+  spi_write_byte(fd, RegAddr::kOpMode, 0x8e);
+  usleep(time_on_air_ms * 1000);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x89);
+
+  // TODO what's wrong with my bitfield man
+  //sx1276::IrqFlags irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
+  //if (!irqs.rx_done)
+
+  uint8_t irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
+  spi_write_byte(fd, RegAddr::kIrqFlags, 0x40 | 0x20 | 0x10);
+  if (!(irqs & 0x40)) {
+    // TODO differentiate between a true radio-side timeout and our timeout
+    // TODO check for valid header as well ?
+    return false;
+  }
+  // Check for CRC error
+  if (irqs & 0x20) {
+    printf("error: crc error detected\n");
+    return false;
+  }
+
+  {
+    auto result = copy_received_message(fd, dest, max_len);
+    if (!result) return result;
+  }
 
   return true;
 }
