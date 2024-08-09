@@ -5,8 +5,8 @@ bcp_sources = [
 ]
 
 bcp_unittests = [
-  { 'test' : 'session_unittest.cpp', 'source' : 'session.cpp' },
-  { 'test' : 'packet_unittest.cpp', 'source' : 'packet.cpp' },
+  { 'test' : 'session_unittest.cpp', 'sources' : ['session.cpp', 'packet.cpp'] },
+  { 'test' : 'packet_unittest.cpp', 'sources' : ['packet.cpp'] },
 ]
 
 libbcp = shared_library('bcp',
@@ -18,7 +18,7 @@ libbcp = shared_library('bcp',
 
 foreach s : bcp_unittests
   testf = s['test']
-  sourcef = s['source']
-  s_e = executable(fs.name(testf) + '_gtest', [testf, sourcef], dependencies : gtest)
+  sources = s['sources']
+  s_e = executable(fs.name(testf) + '_gtest', [testf] + sources, dependencies : gtest)
   test(fs.name(testf), s_e, protocol : 'gtest')
 endforeach

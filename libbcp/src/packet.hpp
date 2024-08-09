@@ -13,6 +13,11 @@ using WireSessionTime = uint64_t;
 constexpr size_t kMaxPayloadLengthBytes = 32;  // could be longer
 constexpr size_t kPacketSizeBytes = kMaxPayloadLengthBytes + 24;
 
+// The physical packet which we send across the radio channel.
+using WirePacket = std::array<uint8_t, kPacketSizeBytes>;
+// The payload of the packet.
+using WirePacketPayload = std::array<uint8_t, kMaxPayloadLengthBytes>;
+
 enum class PacketField {
   kSessionId = 0,
   kNesn,
@@ -21,9 +26,6 @@ enum class PacketField {
   kPayload, // must be last field
 };
 
-/// The physical packet which we send across the radio channel.
-using WirePacket = std::array<uint8_t, kPacketSizeBytes>;
-
 /// A logical representation of a packet in memory.
 /// Must be serialized in order to be sent over the wire.
 struct Packet {
@@ -31,7 +33,7 @@ struct Packet {
   SequenceNumber nesn;
   SequenceNumber sn;
   uint8_t length;
-  std::array<uint8_t, kMaxPayloadLengthBytes> payload;
+  WirePacketPayload payload;
 
   // The actual wire format is described in the .cpp file
   // TODO replace all uses of uint8_t with std::byte everywhere

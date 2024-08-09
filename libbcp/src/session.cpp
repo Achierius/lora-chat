@@ -5,13 +5,24 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace lora_chat {
 
-Session::Clock::Clock(TimePoint start_time, Duration transmission_duration, Duration gap_duration)
-  : start_time_(start_time), transmission_duration_(transmission_duration), gap_duration_(gap_duration) {}
+std::optional<WirePacketPayload> MessagePipe::GetNextMessageToSend() {
+  return get_msg_();
+}
+void MessagePipe::DepositReceivedMessage(WirePacketPayload &&message) {
+  return recv_msg_(std::move(message));
+}
 
-Session::Duration Session::Clock::ElapsedTimeInPeriod(Session::TimePoint t) const {
+Session::Clock::Clock(TimePoint start_time, Duration transmission_duration,
+                      Duration gap_duration)
+    : start_time_(start_time), transmission_duration_(transmission_duration),
+      gap_duration_(gap_duration) {}
+
+Session::Duration
+Session::Clock::ElapsedTimeInPeriod(Session::TimePoint t) const {
   return (t - start_time_) % TransmissionPeriod();
 }
 
@@ -24,7 +35,7 @@ Session::Duration Session::Clock::ElapsedTimeInSession() const {
 }
 
 TransmissionState Session::Clock::InitiatorActionKind(TimePoint t) const {
-  const auto elapsed {ElapsedTimeInPeriod(t)};
+  const auto elapsed{ElapsedTimeInPeriod(t)};
   if (elapsed < transmission_duration_)
     return TransmissionState::kTransmitting;
   else if (elapsed < transmission_duration_ + gap_duration_)
@@ -39,7 +50,7 @@ TransmissionState Session::Clock::InitiatorActionKind() const {
 }
 
 Session::TimePoint Session::Clock::TimeOfNextAction(TimePoint t) const {
-  const auto elapsed {ElapsedTimeInPeriod(t)};
+  const auto elapsed{ElapsedTimeInPeriod(t)};
   if (elapsed < transmission_duration_)
     return t + transmission_duration_ - elapsed;
   else if (elapsed < transmission_duration_ + gap_duration_)
@@ -55,41 +66,132 @@ Session::TimePoint Session::Clock::TimeOfNextAction() const {
   return TimeOfNextAction(std::chrono::steady_clock::now());
 }
 
-Session::Session(Session::Id id, Session::Duration transmission_duration, Session::Duration gap_duration)
-  : id_(id),
-    clock_(std::chrono::steady_clock::now() + kHandshakeLeadTime,
-           transmission_duration,
-           gap_duration),
-    we_initiated_(true) { }
+Session::Session(Session::Id id, Session::Duration transmission_duration,
+                 Session::Duration gap_duration)
+    : id_(id), clock_(std::chrono::steady_clock::now() + kHandshakeLeadTime,
+                      transmission_duration, gap_duration),
+      we_initiated_(true) {}
 
-Session::Session(Session::TimePoint start_time, Session::Id id, Session::Duration transmission_duration,
-         Session::Duration gap_duration)
-  : id_(id),
-    clock_(start_time, transmission_duration, gap_duration),
-    we_initiated_(false) {
+Session::Session(Session::TimePoint start_time, Session::Id id,
+                 Session::Duration transmission_duration,
+                 Session::Duration gap_duration)
+    : id_(id), clock_(start_time, transmission_duration, gap_duration),
+      we_initiated_(false) {
   // TODO check whether the start_time_ is in the past --
   // or insufficiently far in the future?
 }
 
 AgentAction Session::WhatToDoRightNow() const {
-  return WhatToDoIgnoringCurrentTime(LocalizeActionKind(clock_.InitiatorActionKind()));
+  return WhatToDoIgnoringCurrentTime(
+      LocalizeActionKind(clock_.InitiatorActionKind()));
+}
+
+AgentAction Session::ExecuteCurrentAction(RadioInterface &radio, MessagePipe &pipe) {
+  auto action = WhatToDoRightNow();
+  switch (action) {
+  case AgentAction::kReceive:
+    ReceiveMessage(radio, pipe);
+    break;
+  case AgentAction::kTransmitNextMessage:
+    TransmitNextMessage(radio, pipe);
+    break;
+  case AgentAction::kTransmitNack:
+    TransmitNack(radio, pipe);
+    break;
+  case AgentAction::kRetransmitMessage:
+    RetransmitMessage(radio, pipe);
+    break;
+  case AgentAction::kSleepUntilNextAction:
+    break;
+  }
+  return SleepUntilEndOfGapTime();
 }
 
 AgentAction Session::SleepUntilEndOfGapTime() const {
-  TimePoint wake_time {};
-  if (LocalizeActionKind(clock_.InitiatorActionKind()) == TransmissionState::kInactive)
+  TimePoint wake_time{};
+  if (LocalizeActionKind(clock_.InitiatorActionKind()) ==
+      TransmissionState::kInactive)
     wake_time = clock_.TimeOfNextAction();
   else
     wake_time = clock_.TimeOfNextAction(clock_.TimeOfNextAction());
 
   // Pre-compute what action we'll be doing once we're done sleeping,
   // to save time once we wake up
-  AgentAction action = WhatToDoIgnoringCurrentTime(LocalizeActionKind(clock_.InitiatorActionKind(wake_time)));
+  AgentAction action = WhatToDoIgnoringCurrentTime(
+      LocalizeActionKind(clock_.InitiatorActionKind(wake_time)));
   std::this_thread::sleep_until(wake_time);
   return action;
 }
 
-AgentAction Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_state) const {
+void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
+  Packet p{};
+  p.nesn = last_recv_sn_ + 1;
+  p.sn = last_sent_sn_ + 1;  // TODO should nacks actually advance the SN?
+  p.id = id_;
+  p.length = 0;
+
+  radio.Transmit(p.Serialize());
+}
+
+void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
+  Packet p{};
+  p.nesn = last_recv_sn_ + 1;
+  p.sn = last_sent_sn_ + 1;
+  p.id = id_;
+
+  // TODO track the length of messages
+  auto message = pipe.GetNextMessageToSend();
+  if (message) {
+    p.length = message.value().size();
+    std::memcpy(&p.payload, message.value().data(), message.value().size());
+  } else {
+    p.length = 0;
+  }
+
+  radio.Transmit(p.Serialize());
+}
+
+void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
+  received_good_packet_in_last_receive_sequence_ = false;
+  WirePacket w_p {};
+  // TODO repeat receive until we get the proper session id
+  auto status = radio.Receive(w_p);
+  if (!(status == RadioInterface::Status::kSuccess)) {
+    // TODO do we need to do anything special for bad packets?
+    return;
+  }
+  received_good_packet_in_last_receive_sequence_ = true;
+
+  Packet p {Packet::Deserialize(w_p)};
+  if (p.nesn == static_cast<SequenceNumber>(last_sent_sn_ + 1)) {
+    last_acked_sent_sn_ = last_sent_sn_;
+
+    if (p.sn == last_recv_sn_) {
+      // For whatever reason, they're retransmitting their last
+      // message -- even though we already received it.
+      // TODO Is this retransmit case legal??
+      last_recv_message_ = std::move(p.payload);
+      // If so, we don't propogate out the old message since it was logically
+      // overridden by the new one with the same SN
+    } else if (p.sn == last_recv_sn_ + 1) {
+      pipe.DepositReceivedMessage(std::move(last_recv_message_));
+      last_recv_message_ = std::move(p.payload);
+    }
+  } else if (p.nesn == last_sent_sn_) {
+    // Do nothing, they want us to retransmit
+  } else {
+    // Something bad happened!
+    assert(false && "Bad protocol state");
+  }
+}
+
+void Session::RetransmitMessage(RadioInterface &radio, MessagePipe &pipe) {
+  // TODO how to handle it when they nack our nack?
+
+}
+
+AgentAction
+Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_state) const {
   switch (supposed_state) {
   case TransmissionState::kInactive:
     return AgentAction::kSleepUntilNextAction;
@@ -99,24 +201,24 @@ AgentAction Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_stat
     break;
   }
 
+  // If we received no messages since our last transmission, NACK so that
+  // the counterparty retransmits
+  if (!received_good_packet_in_last_receive_sequence_)
+    return AgentAction::kTransmitNack;
+
   // Decide what to transmit
   // this is what we would expect the sn to be if we got a message during the
   // last receive sequence
-  SequenceNumber expected_recv_sn = we_initiated_ ? last_sent_sn_ : last_sent_sn_ + 1;
-  if (last_recv_sn_ == expected_recv_sn) {
+  if (last_acked_sent_sn_ == last_sent_sn_)
     return AgentAction::kTransmitNextMessage;
-  } else if (last_recv_sn_ == expected_recv_sn - 1) {
-    // We received no messages since our last transmission, NACK so that
-    // the counterparty retransmits
-    return AgentAction::kTransmitNack;
-  } else {
-    std::printf("*** error: inconsistent sequence numbers, last-received was %ull, last-sent was %ull\n",
-      last_recv_sn_, last_sent_sn_);
-    std::exit(-1);
-  }
+  else if (last_acked_sent_sn_ + 1 == last_sent_sn_)
+    return AgentAction::kRetransmitMessage;
+  else
+    assert(false && "Unreachable");
 }
 
-TransmissionState Session::LocalizeActionKind(TransmissionState initiator_action_kind) const {
+TransmissionState
+Session::LocalizeActionKind(TransmissionState initiator_action_kind) const {
   if (!we_initiated_) {
     switch (initiator_action_kind) {
     case TransmissionState::kInactive:
@@ -130,4 +232,4 @@ TransmissionState Session::LocalizeActionKind(TransmissionState initiator_action
   return initiator_action_kind;
 }
 
-}  // namespace lora_chat
+} // namespace liora_chat
