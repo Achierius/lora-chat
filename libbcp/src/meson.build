@@ -1,6 +1,6 @@
 bcp_sources = [
   'session.cpp',
-  'radio_interface.cpp',
+  'lora_interface.cpp',
   'packet.cpp',
 ]
 

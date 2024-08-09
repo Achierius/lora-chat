@@ -1,4 +1,4 @@
-#include "radio_interface.hpp"
+#include "lora_interface.hpp"
 #include "sx1276/sx1276.hpp"
 
 namespace lora_chat {
