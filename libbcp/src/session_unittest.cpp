@@ -28,7 +28,7 @@ TEST(ActionTimings, Initiator) {
 
   for (auto const& [transmit, gap] : kTestConfigs) {
     Session session {0, transmit, gap};
-    SequenceNumber sn = 0;
+    SequenceNumber sn = SequenceNumber(0);
     std::this_thread::sleep_for(Session::kHandshakeLeadTime);
     for (int i = 0; i < kPeriodsPerConfig; i++) {
       std::cerr << static_cast<int>(session.WhatToDoRightNow()) << std::endl;
@@ -69,7 +69,7 @@ TEST(ActionTimings, Follower) {
 
   for (auto const& [transmit, gap] : kTestConfigs) {
     Session session {std::chrono::steady_clock::now(), 0, transmit, gap};
-    SequenceNumber sn = 0;
+    SequenceNumber sn = SequenceNumber(0);
     for (int i = 0; i < kPeriodsPerConfig; i++) {
       EXPECT_EQ(session.WhatToDoRightNow(), AgentAction::kReceive);
       session.MarkMessageReceipt(sn);

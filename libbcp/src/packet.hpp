@@ -4,12 +4,12 @@
 #include <cstdint>
 #include <span>
 
+#include "sequence_number.hpp"
+
 namespace lora_chat {
 
 using WireSessionId = uint64_t;
 using WireSessionTime = uint64_t;
-using SequenceNumber = uint8_t; // bluetooth uses 1 bit, but how does that
-                                // handle time-delayed reflections?
 constexpr size_t kMaxPayloadLengthBytes = 32;  // could be longer
 constexpr size_t kPacketSizeBytes = kMaxPayloadLengthBytes + 24;
 

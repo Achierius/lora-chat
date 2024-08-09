@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "packet.hpp"
+#include "sequence_number.hpp"
 
 namespace lora_chat {
 

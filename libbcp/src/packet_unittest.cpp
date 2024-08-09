@@ -9,7 +9,7 @@ TEST(SerDe, Basic) {
   Packet p1{};
   EXPECT_EQ(p1, Packet::Deserialize(p1.Serialize()));
 
-  p1.sn = 1;
+  p1.sn = lora_chat::SequenceNumber(1);
   p1.length = 2;
   EXPECT_EQ(p1, Packet::Deserialize(p1.Serialize()));
 }
@@ -17,11 +17,12 @@ TEST(SerDe, Basic) {
 TEST(SerDe, Chained) {
   using Packet = lora_chat::Packet;
   using WirePacket = lora_chat::WirePacket;
+  using Sn = lora_chat::SequenceNumber;
 
   Packet p1{
       .id = 0xAAAAAAAAAAAAAAAA,
-      .nesn = 0xBB,
-      .sn = 0xCC,
+      .nesn = Sn(0xBB),
+      .sn = Sn(0xCC),
       .length = 0xDD,
       .payload{0xFF},
   };
@@ -66,7 +67,7 @@ TEST(SerDe, Chained) {
   EXPECT_EQ(p1, p3);
   EXPECT_EQ(p2, p3);
 
-  p1.nesn = 0xCC;
+  p1.nesn = Sn(0xCC);
   EXPECT_NE(p1, p2);
   EXPECT_NE(p1, p3);
   EXPECT_EQ(p2, p3);
