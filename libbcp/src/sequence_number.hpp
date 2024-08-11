@@ -2,6 +2,7 @@
 
 #include <compare>
 #include <cstdint>
+#include <limits>
 
 namespace lora_chat {
 
@@ -11,6 +12,9 @@ struct SequenceNumber {
 
   SequenceNumber() = default;
   explicit SequenceNumber(uint8_t v) : value(v) {}
+
+  const static decltype(value) kMaximumValue = 
+    std::numeric_limits<decltype(value)>::max();
 
   friend std::strong_ordering operator<=>(const SequenceNumber &lhs,
                                           const SequenceNumber &rhs) = default;

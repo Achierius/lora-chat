@@ -1,4 +1,5 @@
 #include "session.hpp"
+#include "sequence_number.hpp"
 
 #include <thread>
 
@@ -75,12 +76,22 @@ Session::Session(Session::Id id, Session::Duration transmission_duration,
                  Session::Duration gap_duration)
     : id_(id), clock_(std::chrono::steady_clock::now() + kHandshakeLeadTime,
                       transmission_duration, gap_duration),
+      last_acked_sent_sn_(SequenceNumber(SequenceNumber::kMaximumValue)),
+      last_sent_packet_{.id = id_,
+                        .nesn = SequenceNumber(SequenceNumber::kMaximumValue),
+                        .sn = SequenceNumber(SequenceNumber::kMaximumValue),
+                        .length = 0},
       we_initiated_(true) {}
 
 Session::Session(Session::TimePoint start_time, Session::Id id,
                  Session::Duration transmission_duration,
                  Session::Duration gap_duration)
     : id_(id), clock_(start_time, transmission_duration, gap_duration),
+      last_acked_sent_sn_(SequenceNumber(SequenceNumber::kMaximumValue - 1)),
+      last_sent_packet_{.id = id_,
+                        .nesn = SequenceNumber(0),
+                        .sn = SequenceNumber(SequenceNumber::kMaximumValue),
+                        .length = 0},
       we_initiated_(false) {
   // TODO check whether the start_time_ is in the past --
   // or insufficiently far in the future?
@@ -91,7 +102,8 @@ AgentAction Session::WhatToDoRightNow() const {
       LocalizeActionKind(clock_.InitiatorActionKind()));
 }
 
-AgentAction Session::ExecuteCurrentAction(RadioInterface &radio, MessagePipe &pipe) {
+AgentAction Session::ExecuteCurrentAction(RadioInterface &radio,
+                                          MessagePipe &pipe) {
   auto action = WhatToDoRightNow();
   switch (action) {
   case AgentAction::kReceive:
@@ -132,7 +144,7 @@ AgentAction Session::SleepThroughNextGapTime() const {
 void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
   Packet p{};
   p.nesn = last_recv_sn_ + 1;
-  p.sn = last_sent_sn_ + 1;  // TODO should nacks actually advance the SN?
+  p.sn = last_sent_packet_.sn; // TODO should nacks actually advance the SN?
   p.id = id_;
   p.length = 0;
 
@@ -140,12 +152,11 @@ void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
 }
 
 void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
-  Packet p{};
+  Packet &p = last_sent_packet_;
   p.nesn = last_recv_sn_ + 1;
-  p.sn = last_sent_sn_ + 1;
+  p.sn = last_acked_sent_sn_ + 1;
   p.id = id_;
 
-  // TODO track the length of messages
   auto message = pipe.GetNextMessageToSend();
   if (message) {
     p.length = message.value().size();
@@ -159,7 +170,7 @@ void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
 
 void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
   received_good_packet_in_last_receive_sequence_ = false;
-  WirePacket w_p {};
+  WirePacket w_p{};
   // TODO repeat receive until we get the proper session id
   auto status = radio.Receive(w_p);
   if (!(status == RadioInterface::Status::kSuccess)) {
@@ -168,9 +179,9 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
   }
   received_good_packet_in_last_receive_sequence_ = true;
 
-  Packet p {Packet::Deserialize(w_p)};
-  if (p.nesn == static_cast<SequenceNumber>(last_sent_sn_ + 1)) {
-    last_acked_sent_sn_ = last_sent_sn_;
+  Packet p{Packet::Deserialize(w_p)};
+  if (p.nesn == static_cast<SequenceNumber>(last_sent_packet_.sn + 1)) {
+    last_acked_sent_sn_ = last_sent_packet_.sn;
 
     if (p.sn == last_recv_sn_) {
       // For whatever reason, they're retransmitting their last
@@ -183,7 +194,8 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
       pipe.DepositReceivedMessage(std::move(last_recv_message_));
       last_recv_message_ = std::move(p.payload);
     }
-  } else if (p.nesn == last_sent_sn_) {
+    last_recv_sn_ = p.sn;
+  } else if (p.nesn == last_sent_packet_.sn) {
     // Do nothing, they want us to retransmit
   } else {
     // Something bad happened!
@@ -193,7 +205,7 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
 
 void Session::RetransmitMessage(RadioInterface &radio, MessagePipe &pipe) {
   // TODO how to handle it when they nack our nack?
-
+  radio.Transmit(last_sent_packet_.Serialize());
 }
 
 void Session::SleepUntil(TimePoint t) const {
@@ -230,9 +242,9 @@ Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_state) const {
   // Decide what to transmit
   // this is what we would expect the sn to be if we got a message during the
   // last receive sequence
-  if (last_acked_sent_sn_ == last_sent_sn_)
+  if (last_acked_sent_sn_ == last_sent_packet_.sn)
     return AgentAction::kTransmitNextMessage;
-  else if (last_acked_sent_sn_ + 1 == last_sent_sn_)
+  else if (last_acked_sent_sn_ + 1 == last_sent_packet_.sn)
     return AgentAction::kRetransmitMessage;
   else
     assert(false && "Unreachable");
@@ -253,4 +265,4 @@ Session::LocalizeActionKind(TransmissionState initiator_action_kind) const {
   return initiator_action_kind;
 }
 
-} // namespace liora_chat
+} // namespace lora_chat

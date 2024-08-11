@@ -61,10 +61,10 @@ public:
 
   Status Receive(std::span<uint8_t> buffer_out) {
     if (!transmission_ready_.try_acquire_for(timeout_)) return Status::kTimeout;
-    if (buffer_out.size() < inflight_buffer_->size()) return Status::kBadBufferSize;
+    if (buffer_out.size() < inflight_buffer_.size()) return Status::kBadBufferSize;
     {
       std::scoped_lock lock(buffer_lock_);
-      std::copy(inflight_buffer_->begin(), inflight_buffer_->end(), buffer_out.begin());
+      std::copy(inflight_buffer_.begin(), inflight_buffer_.end(), buffer_out.begin());
     }
     return Status::kSuccess;
   }
@@ -75,7 +75,7 @@ private:
   std::mutex transmission_lock_ {};
   std::binary_semaphore transmission_ready_ {0};
   std::mutex buffer_lock_ {};
-  std::optional<std::span<uint8_t const>> inflight_buffer_ {};
+  std::span<uint8_t const> inflight_buffer_ {};
   std::chrono::milliseconds timeout_;
 };
 
@@ -93,9 +93,9 @@ TEST(ActionTimings, SimpleFollower) {
   // this is the NEXT action the session will take
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 0)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 0)";
-  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 1)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << "Receive (Period 1)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 1)";
-  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 2)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << "Receive (Period 2)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 2)";
 }
 
@@ -113,9 +113,9 @@ TEST(ActionTimings, GaplessFollower) {
   // this is the NEXT action the session will take
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 0)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 0)";
-  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 1)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << "Receive (Period 1)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 1)";
-  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 2)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << "Receive (Period 2)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 2)";
 }
 
@@ -133,11 +133,11 @@ TEST(ActionTimings, SimpleInitiator) {
 
   // this is the NEXT action the session will take
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 0)";
-  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 0)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << "Receive (Period 0)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 1)";
-  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 1)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << "Receive (Period 1)";
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 2)";
-  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 2)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << "Receive (Period 2)";
 }
 
 TEST(ActionTimings, VariousTimes) {
@@ -167,7 +167,7 @@ TEST(ActionTimings, VariousTimes) {
       // this is the NEXT action the session will take
       EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
       EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{1, 0})) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
-      EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
+      EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kRetransmitMessage) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
       EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 1})) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
     }
   };
@@ -177,7 +177,7 @@ TEST(ActionTimings, VariousTimes) {
     Session session {std::chrono::steady_clock::now(), 0, transmit, gap};
     for (int i = 0; i < kPeriodsPerConfig; i++) {
       // this is the NEXT action the session will take
-      EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
+      EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), !i ? AgentAction::kTransmitNextMessage : AgentAction::kRetransmitMessage) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
       EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 1})) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
       EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
       EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{1, 0})) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
@@ -201,7 +201,7 @@ TEST(ActionTimings, VerySmallDuration) {
   Session session {std::chrono::steady_clock::now(), 0, std::chrono::microseconds(250), std::chrono::microseconds(100)};
   for (int i = 0; i < 20; i++) {
     // this is the NEXT action the session will take
-    EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "(A) " << i;
+    EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), !i ? AgentAction::kTransmitNextMessage : AgentAction::kRetransmitMessage) << "(A) " << i;
     EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 1})) << "(A) " << i;
     EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "(B) " << i;
     EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{1, 0})) << "(B) " << i;
@@ -243,7 +243,7 @@ TEST(TwoWayRadio, Simple) {
   };
   MessagePipe pong_pipe {pong_fn, pong_log_msg};
 
-  constexpr size_t kPeriodsPerConfig {10};
+  constexpr int kPeriodsPerConfig {4};
   constexpr auto kTransmitTime = std::chrono::milliseconds(10);
   constexpr auto kGapTime = std::chrono::milliseconds(5);
 

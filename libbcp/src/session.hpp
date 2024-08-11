@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <optional>
 
 #include "packet.hpp"
@@ -147,17 +148,7 @@ public:
   /// Returns the action to take upon waking.
   AgentAction SleepThroughNextGapTime() const;
 
-  void MarkMessageReceipt(SequenceNumber sn) { last_recv_sn_ = sn; }
-  void MarkMessageSend(bool retransmit) {
-    // ignore nacks ig
-    if (!retransmit)
-      last_sent_sn_++;
-  }
-
 private:
-  constexpr static SequenceNumber kInitialSn{
-      std::numeric_limits<SequenceNumber>::max()};
-
   /// Decides what we'd do if we were transmitting/receiving/etc. (according to
   /// `supposed_state`) given the current values of our stored sequence numbers.
   /// For kReceive/kInactive this is 1-to-1, but for kTransmit we might do
@@ -190,14 +181,13 @@ private:
   // packet with greater sn is received -- this is because the transmitter could
   // miss our reply and decide to retransmit, potentially retransmitting a
   // packet with different contents, even if only due to EMI.
-  SequenceNumber last_recv_sn_{kInitialSn};
-  SequenceNumber last_sent_sn_{kInitialSn};
-  SequenceNumber last_acked_sent_sn_{kInitialSn};
+  SequenceNumber last_recv_sn_{SequenceNumber::kMaximumValue};
+  SequenceNumber last_acked_sent_sn_;
   bool received_good_packet_in_last_receive_sequence_ {true};
+  // We buffer this so that we can retransmit it
+  Packet last_sent_packet_;
   // We buffer this and only hand it back out when it's about to be overridden
   WirePacketPayload last_recv_message_{};
-  // We keep this around in case we need to retransmit
-  WirePacketPayload last_sent_message_{};
 
   uint64_t messages_sent_{0};
 
