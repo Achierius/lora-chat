@@ -23,6 +23,7 @@ Session::Clock::Clock(TimePoint start_time, Duration transmission_duration,
 
 Session::Duration
 Session::Clock::ElapsedTimeInPeriod(Session::TimePoint t) const {
+  assert(t >= start_time_);
   return (t - start_time_) % TransmissionPeriod();
 }
 
@@ -35,6 +36,7 @@ Session::Duration Session::Clock::ElapsedTimeInSession() const {
 }
 
 TransmissionState Session::Clock::InitiatorActionKind(TimePoint t) const {
+  assert(t >= start_time_ && "A session cannot do an action before it starts");
   const auto elapsed{ElapsedTimeInPeriod(t)};
   if (elapsed < transmission_duration_)
     return TransmissionState::kTransmitting;
@@ -50,6 +52,9 @@ TransmissionState Session::Clock::InitiatorActionKind() const {
 }
 
 Session::TimePoint Session::Clock::TimeOfNextAction(TimePoint t) const {
+  if (t < start_time_)
+    return start_time_;
+
   const auto elapsed{ElapsedTimeInPeriod(t)};
   if (elapsed < transmission_duration_)
     return t + transmission_duration_ - elapsed;
@@ -104,21 +109,22 @@ AgentAction Session::ExecuteCurrentAction(RadioInterface &radio, MessagePipe &pi
   case AgentAction::kSleepUntilNextAction:
     break;
   }
-  return SleepUntilEndOfGapTime();
+  return SleepThroughNextGapTime();
 }
 
-AgentAction Session::SleepUntilEndOfGapTime() const {
-  TimePoint wake_time{};
-  if (LocalizeActionKind(clock_.InitiatorActionKind()) ==
+AgentAction Session::SleepThroughNextGapTime() const {
+  TimePoint wake_time = clock_.TimeOfNextAction();
+  if (LocalizeActionKind(clock_.InitiatorActionKind(wake_time)) ==
       TransmissionState::kInactive)
-    wake_time = clock_.TimeOfNextAction();
-  else
     wake_time = clock_.TimeOfNextAction(clock_.TimeOfNextAction());
 
   // Pre-compute what action we'll be doing once we're done sleeping,
   // to save time once we wake up
   AgentAction action = WhatToDoIgnoringCurrentTime(
       LocalizeActionKind(clock_.InitiatorActionKind(wake_time)));
+  // The action should not be 'sleep more': if that's the case, we should just
+  // sleep for a longer duration
+  assert(action != AgentAction::kSleepUntilNextAction);
   std::this_thread::sleep_until(wake_time);
   return action;
 }

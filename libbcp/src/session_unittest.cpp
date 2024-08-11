@@ -99,6 +99,26 @@ TEST(ActionTimings, SimpleFollower) {
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 2)";
 }
 
+TEST(ActionTimings, GaplessFollower) {
+  using Session = lora_chat::Session;
+  using AgentAction = lora_chat::AgentAction;
+
+  constexpr auto kTransmitTime = std::chrono::milliseconds(10);
+  constexpr auto kGapTime = std::chrono::milliseconds(0);
+
+  CountingRadio radio{};
+  lora_chat::MessagePipe pipe{};
+  Session session {std::chrono::steady_clock::now(), 0, kTransmitTime, kGapTime};
+
+  // this is the NEXT action the session will take
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 0)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 0)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 1)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 1)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 2)";
+  EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "Transmit (Period 2)";
+}
+
 TEST(ActionTimings, SimpleInitiator) {
   using Session = lora_chat::Session;
   using AgentAction = lora_chat::AgentAction;
@@ -128,7 +148,7 @@ TEST(ActionTimings, Initiator) {
     {std::chrono::milliseconds(10), std::chrono::milliseconds(10)},
     {std::chrono::milliseconds(20), std::chrono::milliseconds(5)},
     {std::chrono::milliseconds(5), std::chrono::milliseconds(20)},
-    {std::chrono::milliseconds(15), std::chrono::milliseconds(7)},
+    {std::chrono::milliseconds(15), std::chrono::milliseconds(0)},
   }};
   constexpr int kPeriodsPerConfig {10}; 
 
@@ -155,7 +175,7 @@ TEST(ActionTimings, Follower) {
     {std::chrono::milliseconds(10), std::chrono::milliseconds(10)},
     {std::chrono::milliseconds(20), std::chrono::milliseconds(5)},
     {std::chrono::milliseconds(5), std::chrono::milliseconds(20)},
-    {std::chrono::milliseconds(15), std::chrono::milliseconds(7)},
+    {std::chrono::milliseconds(15), std::chrono::milliseconds(0)},
   }};
   constexpr int kPeriodsPerConfig {10}; 
 
@@ -179,12 +199,15 @@ TEST(TwoWayRadio, Simple) {
   using AgentAction = lora_chat::AgentAction;
   using Session = lora_chat::Session;
 
+  constexpr bool kLogReceivedMessages = false;
   LocalRadio radio(std::chrono::milliseconds(8));
-  auto ping_log_msg = [](WirePacketPayload &&msg) {
-    printf("pinger received message: \"%s\"\n", reinterpret_cast<const char*>(&msg));
+  auto ping_log_msg = []([[maybe_unused]] WirePacketPayload &&msg) {
+    if constexpr (kLogReceivedMessages)
+      printf("pinger received message: \"%s\"\n", reinterpret_cast<const char*>(&msg));
   };
-  auto pong_log_msg = [](WirePacketPayload &&msg) {
-    printf("ponger received message: \"%s\"\n", reinterpret_cast<const char*>(&msg));
+  auto pong_log_msg = []([[maybe_unused]] WirePacketPayload &&msg) {
+    if constexpr (kLogReceivedMessages)
+      printf("ponger received message: \"%s\"\n", reinterpret_cast<const char*>(&msg));
   };
 
   auto ping_fn = []() {

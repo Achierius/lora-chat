@@ -145,7 +145,7 @@ public:
   /// function will sleep through both the remainder of the reception block as
   /// well as the following gap-time.
   /// Returns the action to take upon waking.
-  AgentAction SleepUntilEndOfGapTime() const;
+  AgentAction SleepThroughNextGapTime() const;
 
   void MarkMessageReceipt(SequenceNumber sn) { last_recv_sn_ = sn; }
   void MarkMessageSend(bool retransmit) {
