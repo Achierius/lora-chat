@@ -140,19 +140,25 @@ TEST(ActionTimings, SimpleInitiator) {
   EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "Receive (Period 2)";
 }
 
-TEST(ActionTimings, Initiator) {
+TEST(ActionTimings, VariousTimes) {
   using Session = lora_chat::Session;
+  using Duration = Session::Duration;
   using AgentAction = lora_chat::AgentAction;
 
-  constexpr std::array<std::pair<std::chrono::milliseconds, std::chrono::milliseconds>, 4> kTestConfigs {{
+  constexpr std::array<std::pair<Duration, Duration>, 9> kTestConfigs {{
     {std::chrono::milliseconds(10), std::chrono::milliseconds(10)},
     {std::chrono::milliseconds(20), std::chrono::milliseconds(5)},
     {std::chrono::milliseconds(5), std::chrono::milliseconds(20)},
     {std::chrono::milliseconds(15), std::chrono::milliseconds(0)},
+    {std::chrono::milliseconds(5), std::chrono::milliseconds(5)},
+    {std::chrono::milliseconds(2), std::chrono::milliseconds(5)},
+    {std::chrono::milliseconds(1), std::chrono::milliseconds(1)},
+    {std::chrono::milliseconds(1), std::chrono::milliseconds(40)},
+    {std::chrono::milliseconds(1), std::chrono::microseconds(10)},
   }};
   constexpr int kPeriodsPerConfig {10}; 
 
-  for (auto const& [transmit, gap] : kTestConfigs) {
+  auto test_as_initiator = [&](Duration transmit, Duration gap) {
     CountingRadio radio{};
     lora_chat::MessagePipe pipe{};
     Session session {0, transmit, gap};
@@ -164,22 +170,8 @@ TEST(ActionTimings, Initiator) {
       EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
       EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 1})) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
     }
-  }
-}
-
-TEST(ActionTimings, Follower) {
-  using Session = lora_chat::Session;
-  using AgentAction = lora_chat::AgentAction;
-
-  constexpr std::array<std::pair<std::chrono::milliseconds, std::chrono::milliseconds>, 4> kTestConfigs {{
-    {std::chrono::milliseconds(10), std::chrono::milliseconds(10)},
-    {std::chrono::milliseconds(20), std::chrono::milliseconds(5)},
-    {std::chrono::milliseconds(5), std::chrono::milliseconds(20)},
-    {std::chrono::milliseconds(15), std::chrono::milliseconds(0)},
-  }};
-  constexpr int kPeriodsPerConfig {10}; 
-
-  for (auto const& [transmit, gap] : kTestConfigs) {
+  };
+  auto test_as_follower = [&](Duration transmit, Duration gap) {
     CountingRadio radio{};
     lora_chat::MessagePipe pipe{};
     Session session {std::chrono::steady_clock::now(), 0, transmit, gap};
@@ -190,6 +182,29 @@ TEST(ActionTimings, Follower) {
       EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
       EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{1, 0})) << " -- transmit: " << transmit << " gap: " << gap << " i: " << i;
     }
+  };
+
+  std::vector<std::thread> executors {};
+  for (auto const& [transmit, gap] : kTestConfigs) {
+    executors.push_back(std::thread(test_as_initiator, transmit, gap));
+    executors.push_back(std::thread(test_as_follower, transmit, gap));
+  }
+  for (auto& thread : executors) thread.join();
+}
+
+TEST(ActionTimings, VerySmallDuration) {
+  using Session = lora_chat::Session;
+  using AgentAction = lora_chat::AgentAction;
+
+  CountingRadio radio{};
+  lora_chat::MessagePipe pipe{};
+  Session session {std::chrono::steady_clock::now(), 0, std::chrono::microseconds(250), std::chrono::microseconds(100)};
+  for (int i = 0; i < 20; i++) {
+    // this is the NEXT action the session will take
+    EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kTransmitNextMessage) << "(A) " << i;
+    EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 1})) << "(A) " << i;
+    EXPECT_EQ(session.ExecuteCurrentAction(radio, pipe), AgentAction::kReceive) << "(B) " << i;
+    EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{1, 0})) << "(B) " << i;
   }
 }
 

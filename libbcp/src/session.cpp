@@ -125,7 +125,7 @@ AgentAction Session::SleepThroughNextGapTime() const {
   // The action should not be 'sleep more': if that's the case, we should just
   // sleep for a longer duration
   assert(action != AgentAction::kSleepUntilNextAction);
-  std::this_thread::sleep_until(wake_time);
+  SleepUntil(wake_time);
   return action;
 }
 
@@ -194,6 +194,21 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
 void Session::RetransmitMessage(RadioInterface &radio, MessagePipe &pipe) {
   // TODO how to handle it when they nack our nack?
 
+}
+
+void Session::SleepUntil(TimePoint t) const {
+  // May need to be higher depending on the target system
+  constexpr Duration kSpinloopThreshold = std::chrono::milliseconds(5);
+
+  // TODO strictly we should be switching behavior based on the duration of the
+  // event taking place AFTER we wake up
+  if (t - std::chrono::steady_clock::now() >= kSpinloopThreshold) {
+    std::this_thread::sleep_until(t);
+  } else {
+    while (t > std::chrono::steady_clock::now()) {
+      std::atomic_signal_fence(std::memory_order_seq_cst);
+    }
+  }
 }
 
 AgentAction

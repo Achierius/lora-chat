@@ -177,6 +177,11 @@ private:
   void ReceiveMessage(RadioInterface& radio, MessagePipe& pipe);
   void RetransmitMessage(RadioInterface& radio, MessagePipe& pipe);
 
+  /// Waits until time t to return.
+  /// If the remaining time is short enough, does not actually sleep the current
+  /// thread: just spins until we hit it instead.
+  void SleepUntil(TimePoint t) const;
+
   Id id_;
 
   Clock clock_;
