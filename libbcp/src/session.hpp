@@ -37,6 +37,9 @@ public:
 
   MessagePipe() : get_msg_(DontSendAMessage), recv_msg_(DropMessage) {}
 
+  MessagePipe(GetMessageFunc get_msg)
+      : get_msg_(get_msg), recv_msg_(DropMessage) {}
+
   MessagePipe(GetMessageFunc get_msg, ReceiveMessageFunc recv_msg)
       : get_msg_(get_msg), recv_msg_(recv_msg) {}
 
