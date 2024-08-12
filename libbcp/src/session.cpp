@@ -142,13 +142,16 @@ AgentAction Session::SleepThroughNextGapTime() const {
 }
 
 void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
+  // TODO this does not correctly handle the case where we NACK a NACK
   Packet p{};
   p.nesn = last_recv_sn_ + 1;
   p.sn = last_sent_packet_.sn; // TODO should nacks actually advance the SN?
   p.id = id_;
   p.length = 0;
 
-  radio.Transmit(p.Serialize());
+  auto w_p = p.Serialize();
+  if constexpr (kLogLevel > kNone) LogForPacket(p, w_p, "Transmitted NACK");
+  radio.Transmit(w_p);
 }
 
 void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
@@ -165,7 +168,9 @@ void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
     p.length = 0;
   }
 
-  radio.Transmit(p.Serialize());
+  auto w_p = p.Serialize();
+  if constexpr (kLogLevel > kNone) LogForPacket(p, w_p, "Transmitted");
+  radio.Transmit(w_p);
 }
 
 void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
@@ -178,8 +183,9 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
     return;
   }
   received_good_packet_in_last_receive_sequence_ = true;
-
   Packet p{Packet::Deserialize(w_p)};
+  if constexpr (kLogLevel > kNone) LogForPacket(p, w_p, "Received");
+
   if (p.nesn == static_cast<SequenceNumber>(last_sent_packet_.sn + 1)) {
     last_acked_sent_sn_ = last_sent_packet_.sn;
 
@@ -205,7 +211,9 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
 
 void Session::RetransmitMessage(RadioInterface &radio, MessagePipe &pipe) {
   // TODO how to handle it when they nack our nack?
-  radio.Transmit(last_sent_packet_.Serialize());
+  auto w_p = last_sent_packet_.Serialize();
+  if constexpr (kLogLevel > kNone) LogForPacket(last_sent_packet_, w_p, "Retransmitted");
+  radio.Transmit(w_p);
 }
 
 void Session::SleepUntil(TimePoint t) const {
@@ -219,6 +227,33 @@ void Session::SleepUntil(TimePoint t) const {
   } else {
     while (t > std::chrono::steady_clock::now()) {
       std::atomic_signal_fence(std::memory_order_seq_cst);
+    }
+  }
+}
+
+void Session::LogForPacket(Packet const& p, [[maybe_unused]] WirePacket const& w_p, const char* action) const {
+  if constexpr (kLogLevel >= kLogPacketMetadata) {
+    const char* kIndent = "        ";
+    const char* role = we_initiated_ ? "Initiator" : "Follower";
+    printf("(%s) %s packet (len %u)\n"
+           "%s  sn %03u,  nesn %03u\n"
+           "%slrsn %03u,  lssn %03u\n"
+           "%s          lassn %03u\n",
+           role, action, p.length, kIndent, p.sn.value, p.nesn.value, kIndent,
+           last_recv_sn_.value, last_sent_packet_.sn.value, kIndent,
+           last_acked_sent_sn_.value);
+    if constexpr (kLogLevel >= kLogPacketBytes) {
+      printf("%s[ ", kIndent);
+      for (uint8_t i = 0; i < w_p.size(); i++) {
+        printf("%02x ", w_p[i]);
+      }
+      printf("]\n");
+    }
+    if constexpr (kLogLevel >= kLogPacketAscii) {
+      if (!p.length)
+        printf("%s<NACK>\n", kIndent);
+      else
+        printf("%s\"%s\"\n", kIndent, p.payload.data());
     }
   }
 }

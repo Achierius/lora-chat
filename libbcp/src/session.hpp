@@ -149,6 +149,14 @@ public:
   AgentAction SleepThroughNextGapTime() const;
 
 private:
+  enum LogLevel {
+    kNone = 0,
+    kLogPacketMetadata = 1,
+    kLogPacketAscii = 2,
+    kLogPacketBytes = 3,
+  };
+  static constexpr LogLevel kLogLevel {kNone};
+
   /// Decides what we'd do if we were transmitting/receiving/etc. (according to
   /// `supposed_state`) given the current values of our stored sequence numbers.
   /// For kReceive/kInactive this is 1-to-1, but for kTransmit we might do
@@ -172,6 +180,8 @@ private:
   /// If the remaining time is short enough, does not actually sleep the current
   /// thread: just spins until we hit it instead.
   void SleepUntil(TimePoint t) const;
+
+  void LogForPacket(Packet const& p, WirePacket const& w_p, const char* action) const;
 
   Id id_;
 
