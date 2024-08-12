@@ -79,6 +79,42 @@ private:
   std::chrono::milliseconds timeout_;
 };
 
+class FallibleLocalRadio : public lora_chat::RadioInterface {
+public:
+  FallibleLocalRadio(std::chrono::milliseconds timeout, int transmission_failure_period, int reception_failure_period)
+    : radio_{timeout},
+      transmission_failure_period_(transmission_failure_period),
+      reception_failure_period_(reception_failure_period) {
+    assert(transmission_failure_period_ >= 0);
+    assert(reception_failure_period_ >= 0);
+  }
+
+  Status Transmit(std::span<uint8_t const> buffer) {
+    if (transmission_failure_period_) {
+      transmission_failure_counter_ = (transmission_failure_counter_ + 1) % transmission_failure_period_;
+      if (!transmission_failure_counter_) return Status::kTimeout;
+    }
+    return radio_.Transmit(buffer);
+  }
+
+  Status Receive(std::span<uint8_t> buffer_out) {
+    if (reception_failure_period_) {
+      reception_failure_counter_ = (reception_failure_counter_ + 1) % reception_failure_period_;
+      if (!reception_failure_counter_) return Status::kTimeout;
+    }
+    return radio_.Receive(buffer_out);
+  }
+
+  size_t MaximumMessageLength() const { return radio_.MaximumMessageLength(); }
+
+private:
+  LocalRadio radio_;
+  int transmission_failure_period_;
+  int transmission_failure_counter_ {0};
+  int reception_failure_period_;
+  int reception_failure_counter_ {0};
+};
+
 TEST(ActionTimings, SimpleFollower) {
   using Session = lora_chat::Session;
   using AgentAction = lora_chat::AgentAction;
@@ -208,42 +244,44 @@ TEST(ActionTimings, VerySmallDuration) {
   }
 }
 
-TEST(TwoWayRadio, Simple) {
-  using WirePacketPayload = lora_chat::WirePacketPayload;
+struct TextTag { const char *str; };
+using MakeMessageType = std::optional<lora_chat::WirePacketPayload>(*)();
+
+template <TextTag const&Tag>
+std::optional<lora_chat::WirePacketPayload> MakeMessage() {
+  lora_chat::WirePacketPayload p {0};
+
+  static std::atomic<int> i {0};
+  std::stringstream ss{};
+  ss << Tag.str << " " << i++;
+  std::strcpy(reinterpret_cast<char*>(&p), ss.str().c_str());
+
+  return std::optional<lora_chat::WirePacketPayload>(p);
+}
+
+template <TextTag const&Tag>
+void ConsumeMessage([[maybe_unused]] lora_chat::WirePacketPayload &&msg) {
+  constexpr bool kVerbose = false;
+  if constexpr (kVerbose)
+    printf("%s received message: \"%s\"\n", Tag.str, reinterpret_cast<const char*>(&msg));
+}
+
+constexpr static TextTag kPingTag = { "PING" };
+constexpr static TextTag kPongTag = { "PONG" };
+constexpr static TextTag kPingerTag = { "Pinger" };
+constexpr static TextTag kPongerTag = { "Ponger" };
+
+TEST(PingPong, Simple) {
   using MessagePipe = lora_chat::MessagePipe;
   using AgentAction = lora_chat::AgentAction;
   using Session = lora_chat::Session;
 
-  constexpr bool kLogReceivedMessages = false;
+  MessagePipe ping_pipe {MakeMessage<kPingTag>, ConsumeMessage<kPingerTag>};
+  MessagePipe pong_pipe {MakeMessage<kPongTag>, ConsumeMessage<kPongerTag>};
+
   LocalRadio radio(std::chrono::milliseconds(8));
-  auto ping_log_msg = []([[maybe_unused]] WirePacketPayload &&msg) {
-    if constexpr (kLogReceivedMessages)
-      printf("pinger received message: \"%s\"\n", reinterpret_cast<const char*>(&msg));
-  };
-  auto pong_log_msg = []([[maybe_unused]] WirePacketPayload &&msg) {
-    if constexpr (kLogReceivedMessages)
-      printf("ponger received message: \"%s\"\n", reinterpret_cast<const char*>(&msg));
-  };
 
-  auto ping_fn = []() {
-    WirePacketPayload p {0};
-    const char* ping = "ping";
-    std::strcpy(reinterpret_cast<char*>(&p), ping);
-
-    return std::optional<WirePacketPayload>(p);
-  };
-  MessagePipe ping_pipe {ping_fn, ping_log_msg};
-
-  auto pong_fn = []() {
-    WirePacketPayload p {0};
-    const char* ping = "pong";
-    std::strcpy(reinterpret_cast<char*>(&p), ping);
-
-    return std::optional<WirePacketPayload>(p);
-  };
-  MessagePipe pong_pipe {pong_fn, pong_log_msg};
-
-  constexpr int kPeriodsPerConfig {4};
+  constexpr int kPeriods {4};
   constexpr auto kTransmitTime = std::chrono::milliseconds(10);
   constexpr auto kGapTime = std::chrono::milliseconds(5);
 
@@ -252,15 +290,53 @@ TEST(TwoWayRadio, Simple) {
   std::this_thread::sleep_for(Session::kHandshakeLeadTime);
 
   std::thread ponger_thread([&ponger, &radio, &pong_pipe]() {
-    for (int i = 0; i < kPeriodsPerConfig; i++) {
+    for (int i = 0; i < kPeriods; i++) {
       EXPECT_EQ(ponger.ExecuteCurrentAction(radio, pong_pipe), AgentAction::kTransmitNextMessage) << " (A) -> ponger @ " << i;
       EXPECT_EQ(ponger.ExecuteCurrentAction(radio, pong_pipe), AgentAction::kReceive) << " (B) ponger @ " << i;
     }
   });
 
-  for (int i = 0; i < kPeriodsPerConfig; i++) {
+  for (int i = 0; i < kPeriods; i++) {
     EXPECT_EQ(pinger.ExecuteCurrentAction(radio, ping_pipe), AgentAction::kReceive) << " (A) pinger @ " << i;
     EXPECT_EQ(pinger.ExecuteCurrentAction(radio, ping_pipe), AgentAction::kTransmitNextMessage) << "  (B)pinger @ " << i;
+  }
+
+  ponger_thread.join();
+}
+
+TEST(PingPong, OneSidedFailures) {
+  using MessagePipe = lora_chat::MessagePipe;
+  using AgentAction = lora_chat::AgentAction;
+  using Session = lora_chat::Session;
+
+  MessagePipe ping_pipe {MakeMessage<kPingTag>, ConsumeMessage<kPingerTag>};
+  MessagePipe pong_pipe {MakeMessage<kPongTag>, ConsumeMessage<kPongerTag>};
+
+  FallibleLocalRadio radio(std::chrono::milliseconds(8), 4, 0);
+
+  constexpr int kPeriods {8};
+  constexpr auto kTransmitTime = std::chrono::milliseconds(10);
+  constexpr auto kGapTime = std::chrono::milliseconds(5);
+
+  Session ponger(std::chrono::steady_clock::now() + Session::kHandshakeLeadTime, 0, kTransmitTime, kGapTime);
+  Session pinger(0, kTransmitTime, kGapTime);
+  std::this_thread::sleep_for(Session::kHandshakeLeadTime);
+
+  std::thread ponger_thread([&ponger, &radio, &pong_pipe]() {
+    for (int i = 0; i < kPeriods; i++) {
+      // The first message to drop will be the second one we send, so one after
+      // that and every other transmission thereafter we will retransmit
+      AgentAction transmitAction = AgentAction::kTransmitNextMessage;
+      if (i > 1 && ((i + 1) % 2)) transmitAction = AgentAction::kRetransmitMessage;
+      EXPECT_EQ(ponger.ExecuteCurrentAction(radio, pong_pipe), transmitAction) << " (A) -> ponger @ " << i;
+      EXPECT_EQ(ponger.ExecuteCurrentAction(radio, pong_pipe), AgentAction::kReceive) << " (B) ponger @ " << i;
+    }
+  });
+
+  for (int i = 0; i < kPeriods; i++) {
+    const AgentAction transmitAction = ((i + 1) % 2) ? AgentAction::kTransmitNextMessage : AgentAction::kTransmitNack;
+    EXPECT_EQ(pinger.ExecuteCurrentAction(radio, ping_pipe), AgentAction::kReceive) << " (A) pinger @ " << i;
+    EXPECT_EQ(pinger.ExecuteCurrentAction(radio, ping_pipe), transmitAction) << "  (B)pinger @ " << i;
   }
 
   ponger_thread.join();
