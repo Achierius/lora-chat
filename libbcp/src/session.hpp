@@ -7,17 +7,12 @@
 #include <utility>
 #include <optional>
 
+#include "clock.hpp"
 #include "packet.hpp"
 #include "radio_interface.hpp"
 #include "sequence_number.hpp"
 
 namespace lora_chat {
-
-enum class TransmissionState {
-  kInactive,
-  kReceiving,
-  kTransmitting,
-};
 
 enum class AgentAction {
   kSleepUntilNextAction,
@@ -58,8 +53,6 @@ private:
 class Session {
 public:
   using Id = WireSessionId;
-  using TimePoint = std::chrono::steady_clock::time_point;
-  using Duration = std::chrono::steady_clock::duration;
   static constexpr Duration kHandshakeLeadTime{
       std::chrono::microseconds(100'000)};
 
@@ -79,11 +72,18 @@ private:
   // `gap_duration`, then transmit for `transmit_duration`, then sleep for
   // `gap_duration`, then repeat.
   // N.b. currently I don't resynchronize after startup, so drift is possible.
-  class Clock {
+  class SessionClock : public Clock {
+  public:
     // TODO support resychronization to account for clock drift
     // TODO account for initial clock skew between the two actors -- can
     // possibly measure during the handshake by measuring the ping time each way
     // and then seeing what the delta is when that is accounted for.
+    SessionClock(TimePoint start_time, Duration transmission_duration,
+          Duration gap_duration)
+      : Clock(start_time), transmission_duration_(transmission_duration),
+        gap_duration_(gap_duration) {}
+
+  private:
     // The "transmission period" Tp is the interval between when the session's
     // initiator should begin transmitting the Nth message and when it should
     // begin transmitting the N+1th message.
@@ -96,28 +96,17 @@ private:
     Duration ElapsedTimeInPeriod(TimePoint t) const;
     Duration ElapsedTimeInCurrentPeriod() const;
 
-  public:
-    Clock(TimePoint start_time, Duration transmission_duration,
-          Duration gap_duration);
-
-    /// Returns the time elapsed since the start of this session.
-    /// This is NOT equal to the time elapsed since this object was created.
-    Duration ElapsedTimeInSession() const;
-
-    /// Returns what kind of action the initiator of this session should be
-    /// undertaking at `time`.
+    /// Returns what kind of action the *initiator* of this session should be
+    /// undertaking at `time`. The follower has to convert this into their own
+    /// local action-kind before it can use it.
     /// We can't know the exact action since that will depend on details like
     /// the values of the sequence numbers at `t`.
-    TransmissionState InitiatorActionKind(TimePoint t) const;
-    TransmissionState InitiatorActionKind() const;
+    TransmissionState ActionKindImpl(TimePoint t) const override;
 
     /// Returns the first time at which an agent, starting at time `t`,
     /// should switch to another action.
-    TimePoint TimeOfNextAction(TimePoint t) const;
-    TimePoint TimeOfNextAction() const;
+    TimePoint TimeOfNextActionImpl(TimePoint t) const override;
 
-  private:
-    TimePoint start_time_;
     Duration transmission_duration_;
     Duration gap_duration_;
   };
@@ -185,7 +174,7 @@ private:
 
   Id id_;
 
-  Clock clock_;
+  SessionClock clock_;
 
   // When a packet is received, we cannot be sure that it is final until a
   // packet with greater sn is received -- this is because the transmitter could

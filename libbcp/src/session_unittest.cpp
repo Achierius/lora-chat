@@ -178,7 +178,7 @@ TEST(ActionTimings, SimpleInitiator) {
 
 TEST(ActionTimings, VariousTimes) {
   using Session = lora_chat::Session;
-  using Duration = Session::Duration;
+  using Duration = lora_chat::Duration;
   using AgentAction = lora_chat::AgentAction;
 
   constexpr std::array<std::pair<Duration, Duration>, 9> kTestConfigs {{
