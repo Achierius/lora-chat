@@ -18,8 +18,7 @@ void MessagePipe::DepositReceivedMessage(WirePacketPayload &&message) {
   return recv_msg_(std::move(message));
 }
 
-Duration
-Session::SessionClock::ElapsedTimeInPeriod(TimePoint t) const {
+Duration Session::SessionClock::ElapsedTimeInPeriod(TimePoint t) const {
   return (t - start_time()) % TransmissionPeriod();
 }
 
@@ -38,8 +37,7 @@ TransmissionState Session::SessionClock::ActionKindImpl(TimePoint t) const {
   return TransmissionState::kInactive;
 }
 
-TimePoint
-Session::SessionClock::TimeOfNextActionImpl(TimePoint t) const {
+TimePoint Session::SessionClock::TimeOfNextActionImpl(TimePoint t) const {
   const auto elapsed{ElapsedTimeInPeriod(t)};
   if (elapsed < transmission_duration_)
     return t + transmission_duration_ - elapsed;
@@ -58,28 +56,26 @@ Session::Session(Session::Id id, Duration transmission_duration,
                       transmission_duration, gap_duration),
       last_acked_sent_sn_(SequenceNumber(SequenceNumber::kMaximumValue)),
       last_sent_packet_{.id = id_,
+                        .length = 0,
                         .nesn = SequenceNumber(SequenceNumber::kMaximumValue),
-                        .sn = SequenceNumber(SequenceNumber::kMaximumValue),
-                        .length = 0},
+                        .sn = SequenceNumber(SequenceNumber::kMaximumValue)},
       we_initiated_(true) {}
 
 Session::Session(TimePoint start_time, Session::Id id,
-                 Duration transmission_duration,
-                 Duration gap_duration)
+                 Duration transmission_duration, Duration gap_duration)
     : id_(id), clock_(start_time, transmission_duration, gap_duration),
       last_acked_sent_sn_(SequenceNumber(SequenceNumber::kMaximumValue - 1)),
       last_sent_packet_{.id = id_,
+                        .length = 0,
                         .nesn = SequenceNumber(0),
-                        .sn = SequenceNumber(SequenceNumber::kMaximumValue),
-                        .length = 0},
+                        .sn = SequenceNumber(SequenceNumber::kMaximumValue)},
       we_initiated_(false) {
   // TODO check whether the start_time_ is in the past --
   // or insufficiently far in the future?
 }
 
 AgentAction Session::WhatToDoRightNow() const {
-  return WhatToDoIgnoringCurrentTime(
-      LocalizeActionKind(clock_.ActionKind()));
+  return WhatToDoIgnoringCurrentTime(LocalizeActionKind(clock_.ActionKind()));
 }
 
 AgentAction Session::ExecuteCurrentAction(RadioInterface &radio,
@@ -122,10 +118,10 @@ AgentAction Session::SleepThroughNextGapTime() const {
 }
 
 void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
-  // TODO this does not correctly handle the case where we NACK a NACK
   Packet p{};
+  p.type = Packet::kNack;
   p.nesn = last_recv_sn_ + 1;
-  p.sn = last_sent_packet_.sn; // TODO should nacks actually advance the SN?
+  p.sn = last_sent_packet_.sn;
   p.id = id_;
   p.length = 0;
 
@@ -137,6 +133,7 @@ void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
 
 void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
   Packet &p = last_sent_packet_;
+  p.type = Packet::kData;
   p.nesn = last_recv_sn_ + 1;
   p.sn = last_acked_sent_sn_ + 1;
   p.id = id_;
@@ -184,7 +181,10 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
       last_recv_message_ = std::move(p.payload);
     }
     last_recv_sn_ = p.sn;
-  } else if (p.nesn == last_sent_packet_.sn) {
+  } else if (p.type == Packet::kNack && p.nesn == last_sent_packet_.sn) {
+    // If p.nesn matches but p.type != kNack, it's a reflected/desync'd data msg
+    // If p.type is kNack but p.nesn is something else, same but a nack
+
     // Do nothing, they want us to retransmit
   } else {
     // Something bad happened!
@@ -221,12 +221,12 @@ void Session::LogForPacket(Packet const &p,
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     const char *kIndent = "        ";
     const char *role = we_initiated_ ? "Initiator" : "Follower";
-    printf("(%s) %s packet (len %u)\n"
+    printf("(%s) %s packet [type %d] (len %u)\n"
            "%s  sn %03u,  nesn %03u\n"
            "%slrsn %03u,  lssn %03u\n"
            "%s          lassn %03u\n",
-           role, action, p.length, kIndent, p.sn.value, p.nesn.value, kIndent,
-           last_recv_sn_.value, last_sent_packet_.sn.value, kIndent,
+           role, action, p.type, p.length, kIndent, p.sn.value, p.nesn.value,
+           kIndent, last_recv_sn_.value, last_sent_packet_.sn.value, kIndent,
            last_acked_sent_sn_.value);
     if constexpr (kLogLevel >= kLogPacketBytes) {
       printf("%s[ ", kIndent);

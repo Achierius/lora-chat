@@ -20,10 +20,11 @@ TEST(SerDe, Chained) {
   using Sn = lora_chat::SequenceNumber;
 
   Packet p1{
-      .id = 0xAAAAAAAAAAAAAAAA,
+      .id = 0xAAAAAAAA,
+      .type = Packet::kNack,
+      .length = 0xDD,
       .nesn = Sn(0xBB),
       .sn = Sn(0xCC),
-      .length = 0xDD,
       .payload{0xFF},
   };
   const WirePacket p1_wire = p1.Serialize();
@@ -59,6 +60,10 @@ TEST(SerDe, Chained) {
     case Field::kPayload:
       EXPECT_EQ(p1.payload, p2.payload);
       EXPECT_EQ(p1.payload, p3.payload);
+      break;
+    case Field::kType:
+      EXPECT_EQ(p1.type, p2.type);
+      EXPECT_EQ(p1.type, p2.type);
       break;
     }
   }

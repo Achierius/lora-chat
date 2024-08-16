@@ -24,15 +24,17 @@ constexpr PacketFieldInfo FieldMetadata(PacketField f) {
   using Field = PacketField;
   switch (f) {
   case Field::kSessionId:
-    return {0, 64, Flag::kNone};
-  case Field::kNesn:
-    return {64, 8, Flag::kNone};
-  case Field::kSn:
-    return {72, 8, Flag::kNone};
+    return {0, 32, Flag::kNone};
+  case Field::kType:
+    return {32, 8, Flag::kNone};
   case Field::kLength:
-    return {80, 8, Flag::kNone};  // TODO impl kZeroEncodesMax
+    return {40, 8, Flag::kNone};  // TODO impl kZeroEncodesMax
+  case Field::kNesn:
+    return {48, 8, Flag::kNone};
+  case Field::kSn:
+    return {56, 8, Flag::kNone};
   case Field::kPayload:
-    return {88, kMaxPayloadLengthBytes * 8, Flag::kNone};
+    return {64, kMaxPayloadLengthBytes * 8, Flag::kNone};
   }
   __builtin_trap();
 }
@@ -74,6 +76,8 @@ uint8_t const* GetPointerToPacketField(Packet const& p, PacketField f) {
   switch (f) {
   case PacketField::kSessionId:
     return reinterpret_cast<uint8_t const*>(&(p.id));
+  case PacketField::kType:
+    return reinterpret_cast<uint8_t const*>(&(p.type));
   case PacketField::kNesn:
     return reinterpret_cast<uint8_t const*>(&(p.nesn));
   case PacketField::kSn:
