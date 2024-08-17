@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sys/types.h>
 #include <thread>
+#include <unistd.h>
 
 #include "clock.hpp"
 #include "sequence_number.hpp"
@@ -39,15 +41,16 @@ TransmissionState Session::SessionClock::ActionKindImpl(TimePoint t) const {
 
 TimePoint Session::SessionClock::TimeOfNextActionImpl(TimePoint t) const {
   const auto elapsed{ElapsedTimeInPeriod(t)};
+  const auto t0 = t - elapsed;
   if (elapsed < transmission_duration_)
-    return t + transmission_duration_ - elapsed;
+    return t0 + transmission_duration_;
   else if (elapsed < transmission_duration_ + gap_duration_)
-    return t + transmission_duration_ + gap_duration_ - elapsed;
+    return t0 + transmission_duration_ + gap_duration_;
   else if (elapsed < (transmission_duration_ * 2) + gap_duration_)
-    return t + (transmission_duration_ * 2) + gap_duration_ - elapsed;
+    return t0 + (transmission_duration_ * 2) + gap_duration_;
 
   assert(TransmissionPeriod() >= elapsed);
-  return t + TransmissionPeriod() - elapsed;
+  return t0 + TransmissionPeriod();
 }
 
 Session::Session(Session::Id id, Duration transmission_duration,
@@ -156,6 +159,7 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
   received_good_packet_in_last_receive_sequence_ = false;
   WirePacket w_p{};
   // TODO repeat receive until we get the proper session id
+  // TODO enforce timeout according to how long we're supposed to receive for
   auto status = radio.Receive(w_p);
   if (!(status == RadioInterface::Status::kSuccess)) {
     // TODO do we need to do anything special for bad packets?
@@ -219,15 +223,16 @@ void Session::LogForPacket(Packet const &p,
                            [[maybe_unused]] WirePacket const &w_p,
                            const char *action) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
+    auto tid = gettid();
     const char *kIndent = "        ";
     const char *role = we_initiated_ ? "Initiator" : "Follower";
-    printf("(%s) %s packet [type %d] (len %u)\n"
+    printf("(t%07d: Session %s) %s packet [type %d] (len %u)\n"
            "%s  sn %03u,  nesn %03u\n"
            "%slrsn %03u,  lssn %03u\n"
            "%s          lassn %03u\n",
-           role, action, p.type, p.length, kIndent, p.sn.value, p.nesn.value,
-           kIndent, last_recv_sn_.value, last_sent_packet_.sn.value, kIndent,
-           last_acked_sent_sn_.value);
+           tid, role, action, p.type, p.length, kIndent, p.sn.value,
+           p.nesn.value, kIndent, last_recv_sn_.value,
+           last_sent_packet_.sn.value, kIndent, last_acked_sent_sn_.value);
     if constexpr (kLogLevel >= kLogPacketBytes) {
       printf("%s[ ", kIndent);
       for (uint8_t i = 0; i < w_p.size(); i++) {

@@ -41,6 +41,8 @@ struct Packet {
     // TODO 0 should be invalid; keeping it this way for ease of testing
     kNack = 0,
     kData = 1,
+    kAdvertisement = 2,
+    kConnectionRequest = 3,
   };
 
   WireSessionId id;
