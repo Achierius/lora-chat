@@ -20,6 +20,7 @@ enum class AgentAction {
   kTransmitNextMessage,
   kRetransmitMessage,
   kTransmitNack,
+  kSessionComplete,
   // TODO support ending the session
 };
 

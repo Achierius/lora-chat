@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <span>
 
@@ -43,6 +44,7 @@ struct Packet {
     kData = 1,
     kAdvertisement = 2,
     kConnectionRequest = 3,
+    kConnectionAccept = 4,
   };
 
   WireSessionId id;
@@ -64,5 +66,22 @@ inline bool operator==(const Packet &lhs, const Packet &rhs) {
           lhs.length == rhs.length && lhs.nesn == rhs.nesn &&
           lhs.sn == rhs.sn && lhs.payload == rhs.payload);
 }
+
+inline const char* TypeStr(Packet::Type t) {
+  switch (t) {
+  case Packet::kNack:
+    return "<NACK>";
+  case Packet::kData:
+    return "<DATA>";
+  case Packet::kAdvertisement:
+    return "<ADVR>";
+  case Packet::kConnectionRequest:
+    return "<CNRQ>";
+  case Packet::kConnectionAccept:
+    return "<CNAC>";
+  }
+  assert(false && "Unknown Packet Type");
+}
+
 
 } // namespace lora_chat

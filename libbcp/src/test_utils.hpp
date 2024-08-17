@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -18,15 +19,34 @@
 
 namespace lora_chat::testutils {
 
+// TODO this should be a wrapper class
 class CountingRadio : public lora_chat::RadioInterface {
 public:
+  CountingRadio() = default;
+  CountingRadio(std::chrono::milliseconds ms)
+    : action_time_(ms) {}
+  CountingRadio(std::pair<bool, bool> cap_mask)
+    : can_transmit_(cap_mask.first), can_receive_(cap_mask.second) {}
+  CountingRadio(std::pair<bool, bool> cap_mask, std::chrono::milliseconds ms)
+    : can_transmit_(cap_mask.first), can_receive_(cap_mask.second), action_time_(ms) {}
+  // TODO this should be a separate class
+  CountingRadio(bool can_transmit, std::function<Status(std::span<uint8_t>)> input_pipe, std::chrono::milliseconds ms)
+    : can_transmit_(can_transmit), can_receive_(true),  get_msg_(input_pipe), action_time_(ms) {}
+  CountingRadio(bool can_transmit, std::function<Status(std::span<uint8_t>)> input_pipe)
+    : can_transmit_(can_transmit), can_receive_(true), get_msg_(input_pipe) {}
+
   Status Transmit(std::span<uint8_t const> buffer) {
+    std::this_thread::sleep_for(action_time_);
     observed_actions_.first++;
+    if (!can_transmit_) return Status::kTimeout;
     return Status::kSuccess;
   }
 
   Status Receive(std::span<uint8_t> buffer_out) {
+    std::this_thread::sleep_for(action_time_);
     observed_actions_.second++;
+    if (!can_receive_) return Status::kTimeout;
+    if (get_msg_) return (*get_msg_)(buffer_out);
     return Status::kSuccess;
   }
 
@@ -39,6 +59,10 @@ public:
   }
 
 private:
+  bool can_transmit_ {true};
+  bool can_receive_ {true};
+  std::optional<std::function<Status(std::span<uint8_t>)>> get_msg_;
+  std::chrono::milliseconds action_time_{0};
   std::pair<int, int> observed_actions_{0, 0};
 };
 

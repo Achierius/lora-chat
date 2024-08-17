@@ -99,6 +99,9 @@ AgentAction Session::ExecuteCurrentAction(RadioInterface &radio,
     break;
   case AgentAction::kSleepUntilNextAction:
     break;
+  case AgentAction::kSessionComplete:
+    assert(false && "Unimplemented");
+    break;
   }
   return SleepThroughNextGapTime();
 }
@@ -161,7 +164,7 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
   // TODO repeat receive until we get the proper session id
   // TODO enforce timeout according to how long we're supposed to receive for
   auto status = radio.Receive(w_p);
-  if (!(status == RadioInterface::Status::kSuccess)) {
+  if (status != RadioInterface::Status::kSuccess) {
     // TODO do we need to do anything special for bad packets?
     return;
   }
@@ -226,11 +229,11 @@ void Session::LogForPacket(Packet const &p,
     auto tid = gettid();
     const char *kIndent = "        ";
     const char *role = we_initiated_ ? "Initiator" : "Follower";
-    printf("(t%07d: Session %s) %s packet [type %d] (len %u)\n"
+    printf("(t%07d: Session %s) %s packet %s (len %u)\n"
            "%s  sn %03u,  nesn %03u\n"
            "%slrsn %03u,  lssn %03u\n"
            "%s          lassn %03u\n",
-           tid, role, action, p.type, p.length, kIndent, p.sn.value,
+           tid, role, action, TypeStr(p.type), p.length, kIndent, p.sn.value,
            p.nesn.value, kIndent, last_recv_sn_.value,
            last_sent_packet_.sn.value, kIndent, last_acked_sent_sn_.value);
     if constexpr (kLogLevel >= kLogPacketBytes) {
@@ -241,9 +244,7 @@ void Session::LogForPacket(Packet const &p,
       printf("]\n");
     }
     if constexpr (kLogLevel >= kLogPacketAscii) {
-      if (!p.length)
-        printf("%s<NACK>\n", kIndent);
-      else
+      if (p.type == Packet::kData)
         printf("%s\"%s\"\n", kIndent, p.payload.data());
     }
   }
