@@ -136,6 +136,7 @@ void ProtocolAgent::DispatchNextState() {
         return ProtocolState::kSeek;
       return ProtocolState::kAdvertise;
     }
+    assert(false && "Unreachable");
   };
   ChangeState(next_state());
 }
@@ -176,7 +177,7 @@ void ProtocolAgent::RequestConnection() {
 
   // Then we wait for the result
   WirePacket w_p{};
-  auto receive_begin = std::chrono::steady_clock::now();
+  auto receive_begin = Now();
   do {
     auto status = radio_.get().Receive(w_p);
     if (status != RadioInterface::Status::kSuccess)
@@ -187,18 +188,18 @@ void ProtocolAgent::RequestConnection() {
     if (response.type == Packet::kConnectionAccept) {
       // TODO confirm they're the party we expect
       // The payload contains our session's start time
-      assert(response.length == sizeof(WireSessionTime));
-      WireSessionTime wire_time{};
+      assert(response.length == sizeof(WireTimePoint));
+      WireTimePoint wire_time{};
       std::memcpy(&wire_time, &response.payload, sizeof(wire_time));
-      TimePoint start_time{std::chrono::microseconds(wire_time)};
+      TimePoint start_time(DeserializeWireTime(wire_time));
       session_.emplace(start_time, id_, kHardcodedTransmissionTime,
-                       kHardcodedSleepTime);
+                       kHardcodedSleepTime, false);
       // Success!
       ChangeState(ProtocolState::kExecuteSession);
+      session_->SleepUntilStartTime();
       return;
     }
-  } while (std::chrono::steady_clock::now() - receive_begin <
-           kHandshakeReceiveDuration);
+  } while (Now() - receive_begin < kHandshakeReceiveDuration);
 
   // Disappointment: no response
   ChangeState(ProtocolState::kDispatch);
@@ -217,7 +218,7 @@ void ProtocolAgent::Advertise() {
 
   // Then we wait for the result
   WirePacket w_p{};
-  auto receive_begin = std::chrono::steady_clock::now();
+  auto receive_begin = Now();
   do {
     auto status = radio_.get().Receive(w_p);
     if (status != RadioInterface::Status::kSuccess)
@@ -230,8 +231,7 @@ void ProtocolAgent::Advertise() {
       ChangeState(ProtocolState::kExecuteHandshakeFromAdvertise);
       return;
     }
-  } while (std::chrono::steady_clock::now() - receive_begin <
-           kConnectionRequestInterval);
+  } while (Now() - receive_begin < kConnectionRequestInterval);
 
   // Disappointment: empty line
   ChangeState(ProtocolState::kDispatch);
@@ -241,13 +241,15 @@ void ProtocolAgent::AcceptConnection() {
   Packet p{};
   p.type = Packet::kConnectionAccept;
   p.id = id_;
-  p.length = sizeof(WireSessionTime);
+  p.length = sizeof(WireTimePoint);
 
-  session_.emplace(id_, kHardcodedTransmissionTime, kHardcodedSleepTime);
-  auto start_time =
-      (std::chrono::steady_clock::now() + Session::kHandshakeLeadTime)
-          .time_since_epoch();
-  std::memcpy(&p.payload, &start_time, sizeof(start_time));
+  WireTimePoint wire_start_time =
+      GetFutureWireTime(kHandshakeLeadTime);
+  std::memcpy(&p.payload, &wire_start_time, sizeof(wire_start_time));
+
+  auto start_time = DeserializeWireTime(wire_start_time);
+  session_.emplace(start_time, id_, kHardcodedTransmissionTime,
+                   kHardcodedSleepTime, true);
 
   auto w_p = p.Serialize();
   if constexpr (kLogLevel >= kLogPacketMetadata)
@@ -260,6 +262,7 @@ void ProtocolAgent::AcceptConnection() {
   }
 
   ChangeState(ProtocolState::kExecuteSession);
+  session_->SleepUntilStartTime();
 }
 
 void ProtocolAgent::ExecuteSession() {

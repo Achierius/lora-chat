@@ -4,13 +4,14 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <utility>
 #include <optional>
+#include <utility>
 
 #include "clock.hpp"
 #include "packet.hpp"
 #include "radio_interface.hpp"
 #include "sequence_number.hpp"
+#include "time.hpp"
 
 namespace lora_chat {
 
@@ -23,8 +24,6 @@ enum class AgentAction {
   kSessionComplete,
   // TODO support ending the session
 };
-
-using WireSessionTime = uint64_t;
 
 class MessagePipe {
   // Any other asynchronous status update callbacks go here
@@ -54,8 +53,6 @@ private:
 class Session {
 public:
   using Id = WireSessionId;
-  static constexpr Duration kHandshakeLeadTime{
-      std::chrono::microseconds(100'000)};
 
 private:
   // Each session is tied to an implicit clock which is synchronized between the
@@ -80,9 +77,9 @@ private:
     // possibly measure during the handshake by measuring the ping time each way
     // and then seeing what the delta is when that is accounted for.
     SessionClock(TimePoint start_time, Duration transmission_duration,
-          Duration gap_duration)
-      : Clock(start_time), transmission_duration_(transmission_duration),
-        gap_duration_(gap_duration) {}
+                 Duration gap_duration)
+        : Clock(start_time), transmission_duration_(transmission_duration),
+          gap_duration_(gap_duration) {}
 
   private:
     // The "transmission period" Tp is the interval between when the session's
@@ -115,37 +112,31 @@ private:
 public:
   /// For sessions we initiate -- we transmit first, and starting at every
   /// time t ≡ 0 (mod Tp)
-  Session(Id id, Duration transmission_duration,
-          Duration gap_duration);
   /// For sessions initiated by the counterparty -- we receive first, and
   /// transmit second as well as at every time
   /// t ≡ Tp/2 (mod Tp)
-  Session(TimePoint start_time, Id id,
-          Duration transmission_duration, Duration gap_duration);
-
-  /// Returns the specific action an agent executing this session should
-  /// start doing right now.
-  AgentAction WhatToDoRightNow() const;
+  Session(TimePoint start_time, Id id, Duration transmission_duration,
+          Duration gap_duration, bool we_initiated);
 
   /// Executes the action which the session expects for the current time.
-  AgentAction ExecuteCurrentAction(RadioInterface& radio, MessagePipe& pipe);
+  AgentAction ExecuteCurrentAction(RadioInterface &radio, MessagePipe &pipe);
 
-  /// Sleeps the current thread until the next time at which
-  /// WhatToDoRightNow would not return either the current action or kInactive.
-  /// N.b. this means that if the current action is e.g. kReceiving, this
-  /// function will sleep through both the remainder of the reception block as
-  /// well as the following gap-time.
-  /// Returns the action to take upon waking.
-  AgentAction SleepThroughNextGapTime() const;
+  /// Sleep the current thread until this session is ready to begin executing.
+  /// May return immediately if the session is already ready.
+  void SleepUntilStartTime() const;
 
 private:
   enum LogLevel {
     kNone = 0,
-    kLogPacketMetadata = 1,
-    kLogPacketAscii = 2,
-    kLogPacketBytes = 3,
+    kLogPacketMetadata,
+    kLogPacketAscii,
+    kLogPacketBytes,
   };
-  static constexpr LogLevel kLogLevel {kNone};
+  static constexpr LogLevel kLogLevel{kNone};
+
+  /// Returns the specific action an agent executing this session should
+  /// start doing right now.
+  AgentAction WhatToDoRightNow() const;
 
   /// Decides what we'd do if we were transmitting/receiving/etc. (according to
   /// `supposed_state`) given the current values of our stored sequence numbers.
@@ -161,17 +152,29 @@ private:
   LocalizeActionKind(TransmissionState initiator_action_kind) const;
 
   // TODO I really want to encapsulate these somehow...
-  void TransmitNack(RadioInterface& radio, MessagePipe& pipe);
-  void TransmitNextMessage(RadioInterface& radio, MessagePipe& pipe);
-  void ReceiveMessage(RadioInterface& radio, MessagePipe& pipe);
-  void RetransmitMessage(RadioInterface& radio, MessagePipe& pipe);
+  void TransmitNack(RadioInterface &radio, MessagePipe &pipe);
+  void TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe);
+  void ReceiveMessage(RadioInterface &radio, MessagePipe &pipe);
+  void RetransmitMessage(RadioInterface &radio, MessagePipe &pipe);
+
+  /// Sleeps the current thread until the next time at which
+  /// WhatToDoRightNow would not return either the current action or kInactive.
+  /// N.b. this means that if the current action is e.g. kReceiving, this
+  /// function will sleep through both the remainder of the reception block as
+  /// well as the following gap-time.
+  /// Returns the action to take upon waking.
+  AgentAction SleepThroughNextGapTime() const;
 
   /// Waits until time t to return.
   /// If the remaining time is short enough, does not actually sleep the current
   /// thread: just spins until we hit it instead.
   void SleepUntil(TimePoint t) const;
 
-  void LogForPacket(Packet const& p, WirePacket const& w_p, const char* action) const;
+  void LogForPacket(Packet const &p, WirePacket const &w_p,
+                    const char *action) const;
+
+  static SequenceNumber InitFictitiousLastAckedSentSn(bool we_initiated);
+  static SequenceNumber InitFictitiousPrevSentNesn(bool we_initiated);
 
   Id id_;
 
@@ -183,7 +186,7 @@ private:
   // packet with different contents, even if only due to EMI.
   SequenceNumber last_recv_sn_{SequenceNumber::kMaximumValue};
   SequenceNumber last_acked_sent_sn_;
-  bool received_good_packet_in_last_receive_sequence_ {true};
+  bool received_good_packet_in_last_receive_sequence_{true};
   // We buffer this so that we can retransmit it
   Packet last_sent_packet_;
   // We buffer this and only hand it back out when it's about to be overridden

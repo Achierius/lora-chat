@@ -3,10 +3,10 @@
 #include <cassert>
 #include <chrono>
 
+#include "time.hpp"
+
 namespace lora_chat {
 
-using TimePoint = std::chrono::steady_clock::time_point;
-using Duration = std::chrono::steady_clock::duration;
 enum class TransmissionState {
   kInactive,
   kReceiving,
@@ -20,15 +20,11 @@ public:
 
   /// Returns the time elapsed since the start of this session.
   /// This is NOT necessarily equal to the time since this object was created.
-  Duration ElapsedTimeSinceStart() const {
-    return std::chrono::steady_clock::now() - start_time_;
-  }
+  Duration ElapsedTimeSinceStart() const { return Now() - start_time_; }
 
   /// Returns what kind of action the user of this clock should be
   /// undertaking at `time`.
-  TransmissionState ActionKind() const {
-    return ActionKind(std::chrono::steady_clock::now());
-  }
+  TransmissionState ActionKind() const { return ActionKind(Now()); }
 
   TransmissionState ActionKind(TimePoint t) const {
     assert(t >= start_time_ &&
@@ -36,9 +32,7 @@ public:
     return ActionKindImpl(t);
   }
 
-  TimePoint TimeOfNextAction() const {
-    return TimeOfNextAction(std::chrono::steady_clock::now());
-  }
+  TimePoint TimeOfNextAction() const { return TimeOfNextAction(Now()); }
 
   TimePoint TimeOfNextAction(TimePoint t) const {
     assert(t >= start_time_ &&

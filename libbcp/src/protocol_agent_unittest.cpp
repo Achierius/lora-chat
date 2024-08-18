@@ -25,7 +25,7 @@ TEST(ActionOrdering, DontActUntilToldTo) {
 
   CountingRadio radio{};
   lora_chat::MessagePipe pipe{};
-  ProtocolAgent agent {0, radio, pipe};
+  ProtocolAgent agent{0, radio, pipe};
 
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
   agent.SetGoal(ProtocolAgent::ConnectionGoal::kSeekConnection);
@@ -43,7 +43,7 @@ TEST(ActionOrdering, AdvertiseNoResponse) {
 
   CountingRadio radio{{true, false}, std::chrono::milliseconds(10)};
   lora_chat::MessagePipe pipe{};
-  ProtocolAgent agent {0, radio, pipe};
+  ProtocolAgent agent{0, radio, pipe};
 
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
   agent.SetGoal(Goal::kAdvertiseConnection);
@@ -65,7 +65,7 @@ TEST(ActionOrdering, SeekNoResponse) {
 
   CountingRadio radio{std::chrono::milliseconds(10)};
   lora_chat::MessagePipe pipe{};
-  ProtocolAgent agent {0, radio, pipe};
+  ProtocolAgent agent{0, radio, pipe};
 
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
   agent.SetGoal(Goal::kSeekConnection);
@@ -82,7 +82,7 @@ TEST(ActionOrdering, AdvertiseAndSeek) {
   // Will not receive anything
   CountingRadio radio{{true, false}, std::chrono::milliseconds(10)};
   lora_chat::MessagePipe pipe{};
-  ProtocolAgent agent {0, radio, pipe};
+  ProtocolAgent agent{0, radio, pipe};
 
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
   agent.SetGoal(Goal::kSeekAndAdvertiseConnection);
@@ -97,7 +97,6 @@ TEST(ActionOrdering, AdvertiseAndSeek) {
     agent.ExecuteAgentAction();
   }
 }
-
 
 TEST(ActionOrdering, AdvertiseSuccess) {
   using ProtocolAgent = lora_chat::ProtocolAgent;
@@ -116,7 +115,7 @@ TEST(ActionOrdering, AdvertiseSuccess) {
   };
   CountingRadio radio{true, send_conreq, std::chrono::milliseconds(50)};
   lora_chat::MessagePipe pipe{};
-  ProtocolAgent agent {0, radio, pipe};
+  ProtocolAgent agent{0, radio, pipe};
 
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
   agent.SetGoal(Goal::kAdvertiseConnection);
@@ -145,7 +144,7 @@ TEST(ActionOrdering, SeekSuccess) {
   };
   CountingRadio radio{true, send_advert, std::chrono::milliseconds(50)};
   lora_chat::MessagePipe pipe{};
-  ProtocolAgent agent {0, radio, pipe};
+  ProtocolAgent agent{0, radio, pipe};
 
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
   agent.SetGoal(Goal::kSeekConnection);
@@ -160,20 +159,38 @@ TEST(ActionOrdering, SeekSuccess) {
   EXPECT_GE(recv, 2);
 }
 
+constexpr static TextTag kPingTag = {"PING"};
+constexpr static TextTag kPongTag = {"PONG"};
+constexpr static TextTag kPingerTag = {"Pinger"};
+constexpr static TextTag kPongerTag = {"Ponger"};
+
 TEST(Handshake, Simple) {
   using ProtocolAgent = lora_chat::ProtocolAgent;
   using Goal = ProtocolAgent::ConnectionGoal;
+  using MessagePipe = lora_chat::MessagePipe;
 
   LocalRadio radio{std::chrono::milliseconds(50)};
-  lora_chat::MessagePipe pipe_a{};
-  lora_chat::MessagePipe pipe_b{};
-  ProtocolAgent agent_a {0, radio, pipe_a};
-  ProtocolAgent agent_b {1, radio, pipe_b};
+  MessagePipe ping_pipe{MakeMessage<kPingTag>, ConsumeMessage<kPingerTag>};
+  MessagePipe pong_pipe{MakeMessage<kPongTag>, ConsumeMessage<kPongerTag>};
+  ProtocolAgent agent_a{0, radio, ping_pipe};
+  ProtocolAgent agent_b{1, radio, pong_pipe};
 
   agent_a.SetGoal(Goal::kAdvertiseConnection);
   agent_b.SetGoal(Goal::kSeekConnection);
 
-  // TODO actually test the handshake
+  std::thread seeker_thread([&]() {
+    for (int i = 0; i < 10; i++) {
+      agent_b.ExecuteAgentAction();
+    }
+  });
+  for (int i = 0; i < 10; i++) {
+    agent_a.ExecuteAgentAction();
+  }
+
+  EXPECT_TRUE(agent_a.InSession());
+  EXPECT_TRUE(agent_b.InSession());
+
+  seeker_thread.join();
 }
 
 } // namespace

@@ -8,6 +8,7 @@
 #include "packet.hpp"
 #include "radio_interface.hpp"
 #include "session.hpp"
+#include "time.hpp"
 
 namespace lora_chat {
 
@@ -66,18 +67,11 @@ public:
   ProtocolAgent(Id id, RadioInterface &radio, MessagePipe pipe)
       : id_(id), radio_(radio), pipe_(pipe) {}
 
-  // TODO this should happen automatically within the agent
-  void StartSession(Session &&session) {
-    assert(!session_);
-    state_ = ProtocolState::kExecuteSession;
-    session_.emplace(session);
-  }
-
   void ExecuteAgentAction();
 
-  void SetGoal(ConnectionGoal goal) {
-    goal_ = goal;
-  }
+  void SetGoal(ConnectionGoal goal) { goal_ = goal; }
+
+  bool InSession() { return (state_ == ProtocolState::kExecuteSession); }
 
 private:
   enum LogLevel {
@@ -86,8 +80,9 @@ private:
     kLogPacketMetadata,
     kLogPacketBytes,
   };
-  static constexpr LogLevel kLogLevel {kLogPacketBytes};
+  static constexpr LogLevel kLogLevel{kNone};
 
+  static constexpr Duration kHandshakeLeadTime{std::chrono::milliseconds(100)};
   static constexpr auto kBaseAdvertisingInterval =
       std::chrono::milliseconds(550);
   // TODO implement dual seek/advertise mode
@@ -98,10 +93,12 @@ private:
   // TODO set up scanning intervals within the non-advertising portion
   static constexpr auto kConnectionRequestInterval =
       kBaseAdvertisingInterval - kAdvertisingTransmissionDuration;
-  static constexpr auto kHandshakeReceiveDuration = std::chrono::milliseconds(400);
+  static constexpr auto kHandshakeReceiveDuration =
+      std::chrono::milliseconds(400);
   static constexpr auto kPendSleepTime = std::chrono::milliseconds(100);
 
-  static constexpr auto kHardcodedTransmissionTime = std::chrono::milliseconds(400);
+  static constexpr auto kHardcodedTransmissionTime =
+      std::chrono::milliseconds(400);
   static constexpr auto kHardcodedSleepTime = std::chrono::milliseconds(200);
 
   void LogPacket(Packet const &p, [[maybe_unused]] WirePacket const &w_p,
@@ -125,7 +122,7 @@ private:
   std::optional<Session> session_;
 
   ProtocolState prior_state_{ProtocolState::kPend};
-  ProtocolState state_{ProtocolState::kDispatch};
+  std::atomic<ProtocolState> state_{ProtocolState::kDispatch};
   std::atomic<ConnectionGoal> goal_{ConnectionGoal::kDisconnect};
 };
 

@@ -53,28 +53,27 @@ TimePoint Session::SessionClock::TimeOfNextActionImpl(TimePoint t) const {
   return t0 + TransmissionPeriod();
 }
 
-Session::Session(Session::Id id, Duration transmission_duration,
-                 Duration gap_duration)
-    : id_(id), clock_(std::chrono::steady_clock::now() + kHandshakeLeadTime,
-                      transmission_duration, gap_duration),
-      last_acked_sent_sn_(SequenceNumber(SequenceNumber::kMaximumValue)),
-      last_sent_packet_{.id = id_,
-                        .length = 0,
-                        .nesn = SequenceNumber(SequenceNumber::kMaximumValue),
-                        .sn = SequenceNumber(SequenceNumber::kMaximumValue)},
-      we_initiated_(true) {}
-
 Session::Session(TimePoint start_time, Session::Id id,
-                 Duration transmission_duration, Duration gap_duration)
+                 Duration transmission_duration, Duration gap_duration,
+                 bool we_initiated)
     : id_(id), clock_(start_time, transmission_duration, gap_duration),
-      last_acked_sent_sn_(SequenceNumber(SequenceNumber::kMaximumValue - 1)),
+      last_acked_sent_sn_(InitFictitiousLastAckedSentSn(we_initiated)),
       last_sent_packet_{.id = id_,
                         .length = 0,
-                        .nesn = SequenceNumber(0),
+                        .nesn = InitFictitiousPrevSentNesn(we_initiated),
                         .sn = SequenceNumber(SequenceNumber::kMaximumValue)},
-      we_initiated_(false) {
+      we_initiated_(we_initiated) {
   // TODO check whether the start_time_ is in the past --
   // or insufficiently far in the future?
+}
+
+SequenceNumber Session::InitFictitiousLastAckedSentSn(bool we_initiated) {
+  return SequenceNumber(we_initiated ? SequenceNumber::kMaximumValue
+                                     : SequenceNumber::kMaximumValue - 1);
+}
+
+SequenceNumber Session::InitFictitiousPrevSentNesn(bool we_initiated) {
+  return SequenceNumber(we_initiated ? SequenceNumber::kMaximumValue : 0);
 }
 
 AgentAction Session::WhatToDoRightNow() const {
@@ -122,6 +121,8 @@ AgentAction Session::SleepThroughNextGapTime() const {
   SleepUntil(wake_time);
   return action;
 }
+
+void Session::SleepUntilStartTime() const { SleepUntil(clock_.start_time()); }
 
 void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
   Packet p{};
