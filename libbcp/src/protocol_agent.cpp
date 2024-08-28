@@ -137,6 +137,14 @@ void ProtocolAgent::ChangeState(ProtocolState new_state) {
   state_ = new_state;
 }
 
+std::pair<RadioInterface::Status, WirePacket> ProtocolAgent::ReceivePacket() {
+  ReceiveBuffer buff{};
+  auto status = radio_.get().Receive(buff.Span());
+
+  // Unfortunate copy
+  return {status, buff.packet};
+}
+
 void ProtocolAgent::DispatchNextState() {
   auto next_state = [&]() {
     switch (goal_) {
@@ -163,9 +171,8 @@ void ProtocolAgent::Pend() {
 }
 
 void ProtocolAgent::Seek() {
-  WirePacket w_p{};
   auto get_ad = [&]() -> bool {
-    auto status = radio_.get().Receive(w_p);
+    auto [status, w_p] = ReceivePacket();
     if (!(status == RadioInterface::Status::kSuccess)) {
       LogStr("failed to receive packet in seek: %d", status);
       return false;
@@ -193,10 +200,9 @@ void ProtocolAgent::RequestConnection() {
     LogPacket(conn_req, w_conn_req, "Transmitted");
 
   // Then we wait for the result
-  WirePacket w_p{};
   auto receive_begin = Now();
   do {
-    auto status = radio_.get().Receive(w_p);
+    auto [status, w_p] = ReceivePacket();
     if (status != RadioInterface::Status::kSuccess) {
       LogStr("failed to receive connection-accept: %d", status);
       continue;
@@ -236,10 +242,9 @@ void ProtocolAgent::Advertise() {
     LogPacket(conn_req, w_conn_req, "Transmitted");
 
   // Then we wait for the result
-  WirePacket w_p{};
   auto receive_begin = Now();
   do {
-    auto status = radio_.get().Receive(w_p);
+    auto [status, w_p] = ReceivePacket();
     if (status != RadioInterface::Status::kSuccess)
       continue;
     Packet response{Packet::Deserialize(w_p)};

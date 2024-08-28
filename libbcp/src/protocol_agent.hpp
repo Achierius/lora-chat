@@ -97,8 +97,9 @@ private:
       std::chrono::milliseconds(400);
   static constexpr auto kPendSleepTime = std::chrono::milliseconds(100);
 
+  // TODO this is implicitly tied to the ToA computations I don't do yet
   static constexpr auto kHardcodedTransmissionTime =
-      std::chrono::milliseconds(400);
+      std::chrono::milliseconds(800);
   static constexpr auto kHardcodedSleepTime = std::chrono::milliseconds(200);
 
   void LogStr(const char* format, ...) const;
@@ -106,6 +107,8 @@ private:
                  const char *action) const;
   const char *StateStr(ProtocolState s) const;
   void ChangeState(ProtocolState new_state);
+
+  std::pair<RadioInterface::Status, WirePacket> ReceivePacket();
 
   void DispatchNextState();
   void Pend();

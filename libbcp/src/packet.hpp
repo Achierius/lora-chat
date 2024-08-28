@@ -6,12 +6,12 @@
 #include <span>
 
 #include "sequence_number.hpp"
+#include "sx1276/sx1276.hpp"
 
 namespace lora_chat {
 
 using WireSessionId = uint32_t;
 using WirePacketType = uint8_t;
-using WireSessionTime = uint64_t;
 using WireSequenceNumber = uint8_t;
 using WirePayloadLength = uint8_t;
 constexpr size_t kMaxPayloadLengthBytes = 32; // could be longer
@@ -21,6 +21,14 @@ constexpr size_t kPacketSizeBytes =
 
 // The physical packet which we send across the radio channel.
 using WirePacket = std::array<uint8_t, kPacketSizeBytes>;
+static_assert(kPacketSizeBytes <= SX127x_FIFO_CAPACITY);
+struct __attribute__ ((packed)) ReceiveBuffer {
+  WirePacket packet;
+  std::array<uint8_t, SX127x_FIFO_CAPACITY - kPacketSizeBytes> unused;
+  std::span<uint8_t> Span() { // TODO this is gross
+    return {reinterpret_cast<uint8_t*>(this), sizeof(*this) / sizeof(uint8_t)};
+  }
+};
 // The payload of the packet.
 using WirePacketPayload = std::array<uint8_t, kMaxPayloadLengthBytes>;
 

@@ -161,10 +161,11 @@ void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
 
 void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
   received_good_packet_in_last_receive_sequence_ = false;
-  WirePacket w_p{};
+  ReceiveBuffer buff{};
+  WirePacket &w_p = buff.packet;
   // TODO repeat receive until we get the proper session id
   // TODO enforce timeout according to how long we're supposed to receive for
-  auto status = radio.Receive(w_p);
+  auto status = radio.Receive(buff.Span());
   if (status != RadioInterface::Status::kSuccess) {
     // TODO do we need to do anything special for bad packets?
     return;
