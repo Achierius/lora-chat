@@ -21,6 +21,7 @@ enum class AgentAction {
   kTransmitNextMessage,
   kRetransmitMessage,
   kTransmitNack,
+  kTerminateSession,
   kSessionComplete,
   // TODO support ending the session
 };
@@ -134,6 +135,12 @@ private:
   };
   static constexpr LogLevel kLogLevel{kNone};
 
+  // TODO this can be part of a party-private configuration that we pass in on
+  // construction
+  // The amount of nacks we have to transmit in a row before calling it quits
+  // and killing the session
+  static constexpr int kTimeoutLimit{4};
+
   /// Returns the specific action an agent executing this session should
   /// start doing right now.
   AgentAction WhatToDoRightNow() const;
@@ -156,6 +163,7 @@ private:
   void TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe);
   void ReceiveMessage(RadioInterface &radio, MessagePipe &pipe);
   void RetransmitMessage(RadioInterface &radio, MessagePipe &pipe);
+  void TerminateSession(RadioInterface &radio, MessagePipe &pipe);
 
   /// Sleeps the current thread until the next time at which
   /// WhatToDoRightNow would not return either the current action or kInactive.
@@ -191,6 +199,9 @@ private:
   Packet last_sent_packet_;
   // We buffer this and only hand it back out when it's about to be overridden
   WirePacketPayload last_recv_message_{};
+
+  int timeout_counter_{0};
+  bool session_complete_{false};
 
   uint64_t messages_sent_{0};
 

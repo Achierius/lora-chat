@@ -96,10 +96,11 @@ AgentAction Session::ExecuteCurrentAction(RadioInterface &radio,
   case AgentAction::kRetransmitMessage:
     RetransmitMessage(radio, pipe);
     break;
-  case AgentAction::kSleepUntilNextAction:
+  case AgentAction::kTerminateSession:
+    TerminateSession(radio, pipe);
     break;
+  case AgentAction::kSleepUntilNextAction:
   case AgentAction::kSessionComplete:
-    assert(false && "Unimplemented");
     break;
   }
   return SleepThroughNextGapTime();
@@ -136,6 +137,7 @@ void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
   if constexpr (kLogLevel > kNone)
     LogForPacket(p, w_p, "Transmitted NACK");
   radio.Transmit(w_p);
+  timeout_counter_++;
 }
 
 void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
@@ -171,6 +173,7 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
     return;
   }
   received_good_packet_in_last_receive_sequence_ = true;
+  timeout_counter_ = 0;
   Packet p{Packet::Deserialize(w_p)};
   if constexpr (kLogLevel > kNone)
     LogForPacket(p, w_p, "Received");
@@ -207,6 +210,12 @@ void Session::RetransmitMessage(RadioInterface &radio, MessagePipe &pipe) {
   if constexpr (kLogLevel > kNone)
     LogForPacket(last_sent_packet_, w_p, "Retransmitted");
   radio.Transmit(w_p);
+}
+
+void Session::TerminateSession(RadioInterface &, MessagePipe &) {
+  session_complete_ = true;
+  // TODO flush buffers
+  // TODO send a termination packet
 }
 
 void Session::SleepUntil(TimePoint t) const {
@@ -254,6 +263,8 @@ void Session::LogForPacket(Packet const &p,
 
 AgentAction
 Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_state) const {
+  if (session_complete_) return AgentAction::kSessionComplete;
+
   switch (supposed_state) {
   case TransmissionState::kInactive:
     return AgentAction::kSleepUntilNextAction;
@@ -266,7 +277,7 @@ Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_state) const {
   // If we received no messages since our last transmission, NACK so that
   // the counterparty retransmits
   if (!received_good_packet_in_last_receive_sequence_)
-    return AgentAction::kTransmitNack;
+    return(timeout_counter_ <= kTimeoutLimit) ? AgentAction::kTransmitNack : AgentAction::kTerminateSession;
 
   // Decide what to transmit
   // this is what we would expect the sn to be if we got a message during the
