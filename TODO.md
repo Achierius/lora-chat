@@ -12,3 +12,5 @@ From 2024-08-17:
     - Add resynchronizing packets to sessions if necessary
     - Add randomization to the dual advertise-seek mode to prevent overlap
     - Allow for different packet types to have different lengths so advertising packets can be shorter
+From 2024-08-28:
+    - Hide library internals behind opaque APIs
