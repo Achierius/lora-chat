@@ -101,6 +101,7 @@ private:
       std::chrono::milliseconds(400);
   static constexpr auto kHardcodedSleepTime = std::chrono::milliseconds(200);
 
+  void LogStr(const char* format, ...) const;
   void LogPacket(Packet const &p, [[maybe_unused]] WirePacket const &w_p,
                  const char *action) const;
   const char *StateStr(ProtocolState s) const;

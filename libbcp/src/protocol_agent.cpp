@@ -2,6 +2,7 @@
 #include "packet.hpp"
 
 #include <cassert>
+#include <cstdarg>
 #include <cstring>
 #include <sys/types.h>
 #include <thread>
@@ -72,16 +73,30 @@ void ProtocolAgent::ExecuteAgentAction() {
   }
 }
 
+void ProtocolAgent::LogStr(const char* format, ...) const {
+  char buffer[512];
+
+  va_list args;
+  va_start(args, format);
+
+  vsnprintf(buffer, sizeof(buffer), format, args);
+
+  va_end(args);
+
+  printf("(t%07d: ProtocolAgent) %s\n", gettid(), buffer);
+}
+
+
 void ProtocolAgent::LogPacket(Packet const &p,
                               [[maybe_unused]] WirePacket const &w_p,
                               const char *action) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
-    auto tid = gettid();
     const char *kIndent = "        ";
-    printf("(t%07d: ProtocolAgent) %s packet %s (len %u)\n"
+    LogStr("%s packet %s (len %u)\n"
            "%s  sn %03u,  nesn %03u\n",
-           tid, action, TypeStr(p.type), p.length, kIndent, p.sn.value,
+           action, TypeStr(p.type), p.length, kIndent, p.sn.value,
            p.nesn.value);
+
     if constexpr (kLogLevel >= kLogPacketBytes) {
       printf("%s[ ", kIndent);
       for (uint8_t i = 0; i < w_p.size(); i++) {
@@ -151,8 +166,10 @@ void ProtocolAgent::Seek() {
   WirePacket w_p{};
   auto get_ad = [&]() -> bool {
     auto status = radio_.get().Receive(w_p);
-    if (!(status == RadioInterface::Status::kSuccess))
+    if (!(status == RadioInterface::Status::kSuccess)) {
+      LogStr("failed to receive packet in seek: %d", status);
       return false;
+    }
     auto p{Packet::Deserialize(w_p)};
     if constexpr (kLogLevel >= kLogPacketMetadata)
       LogPacket(p, w_p, "Received");
@@ -180,8 +197,10 @@ void ProtocolAgent::RequestConnection() {
   auto receive_begin = Now();
   do {
     auto status = radio_.get().Receive(w_p);
-    if (status != RadioInterface::Status::kSuccess)
+    if (status != RadioInterface::Status::kSuccess) {
+      LogStr("failed to receive connection-accept: %d", status);
       continue;
+    }
     Packet response{Packet::Deserialize(w_p)};
     if constexpr (kLogLevel > kNone)
       LogPacket(response, w_p, "Received");
