@@ -11,85 +11,169 @@
 namespace lora_chat {
 
 using WireSessionId = uint32_t;
-using WirePacketType = uint8_t;
+using WireAddress = uint32_t;
 using WireSequenceNumber = uint8_t;
 using WirePayloadLength = uint8_t;
-constexpr size_t kMaxPayloadLengthBytes = 32; // could be longer
-constexpr size_t kPacketSizeBytes =
-    kMaxPayloadLengthBytes + sizeof(WireSessionId) + sizeof(WirePacketType) +
-    sizeof(WirePayloadLength) + (2 * sizeof(WireSequenceNumber));
 
-// The physical packet which we send across the radio channel.
-using WirePacket = std::array<uint8_t, kPacketSizeBytes>;
-static_assert(kPacketSizeBytes <= SX127x_FIFO_CAPACITY);
-struct __attribute__ ((packed)) ReceiveBuffer {
-  WirePacket packet;
-  std::array<uint8_t, SX127x_FIFO_CAPACITY - kPacketSizeBytes> unused;
-  std::span<uint8_t> Span() { // TODO this is gross
-    return {reinterpret_cast<uint8_t*>(this), sizeof(*this) / sizeof(uint8_t)};
-  }
+constexpr size_t kSessionPacketPayloadBytes = 32;
+using SessionPacketPayload = std::array<uint8_t, kSessionPacketPayloadBytes>;
+
+enum class PacketType : uint8_t {
+  kSession = 0,
+  kAdvertising,
 };
-// The payload of the packet.
-using WirePacketPayload = std::array<uint8_t, kMaxPayloadLengthBytes>;
+constexpr PacketType kFinalPacketType = PacketType::kAdvertising;
 
-enum class PacketField {
-  kSessionId = 0,
-  kType,
-  kLength,
-  kNesn,
-  kSn,
-  kPayload, // must be last field
+enum PacketFieldFlags : uint32_t {
+  kNone = 0,
+  kMayOverlap = 1,
+  kZeroEncodesMax = 2,
+};
+
+struct PacketFieldInfo {
+  size_t starting_bit;
+  size_t length_bits;
+  PacketFieldFlags flags;
 };
 
 /// A logical representation of a packet in memory.
 /// Must be serialized in order to be sent over the wire.
-struct Packet {
-  // TODO make this a proper sum type
-  // TODO make this printable
-  enum Type {
+template <PacketType Pt>
+struct Packet;
+
+template <>
+struct Packet<PacketType::kSession> {
+  static constexpr PacketType kType = PacketType::kSession;
+
+  enum class Field {
+    kSessionId = 0,
+    kType,
+    kLength,
+    kNesn,
+    kSn,
+    kPayload, // must be last field
+  };
+
+  enum SubType {
     // TODO 0 should be invalid; keeping it this way for ease of testing
     kNack = 0,
     kData = 1,
-    kAdvertisement = 2,
     kConnectionRequest = 3,
     kConnectionAccept = 4,
   };
 
+  static constexpr Field kFinalField = Field::kPayload;
+
+  static constexpr PacketFieldInfo FieldMetadata(Field f) {
+    using Flag = PacketFieldFlags;
+    switch (f) {
+    case Field::kSessionId:
+      return {0, 32, Flag::kNone};
+    case Field::kType:
+      return {32, 8, Flag::kNone};
+    case Field::kLength:
+      return {40, 8, Flag::kNone};  // TODO impl kZeroEncodesMax
+    case Field::kNesn:
+      return {48, 8, Flag::kNone};
+    case Field::kSn:
+      return {56, 8, Flag::kNone};
+    case Field::kPayload:
+      return {64, kSessionPacketPayloadBytes * 8, Flag::kNone};
+    }
+    __builtin_trap();
+  }
+
+  uint8_t const* GetFieldPointer(Field f) const {
+    switch (f) {
+    case Field::kSessionId:
+      return reinterpret_cast<uint8_t const*>(&(id));
+    case Field::kType:
+      return reinterpret_cast<uint8_t const*>(&(type));
+    case Field::kNesn:
+      return reinterpret_cast<uint8_t const*>(&(nesn));
+    case Field::kSn:
+      return reinterpret_cast<uint8_t const*>(&(sn));
+    case Field::kLength:
+      return reinterpret_cast<uint8_t const*>(&(length));
+    case Field::kPayload:
+      return reinterpret_cast<uint8_t const*>(&(payload));
+    }
+    __builtin_trap();
+  }
+
+  uint8_t* GetFieldPointer(Field f) {
+    using ConstThis = const Packet<kType>*;
+    // this is legal because we know that the original type is non-const
+    return const_cast<uint8_t*>(const_cast<ConstThis>(this)->GetFieldPointer(f));
+  }
+
   WireSessionId id;
-  Type type;
+  SubType type;
   WirePayloadLength length;
   SequenceNumber nesn;
   SequenceNumber sn;
-  WirePacketPayload payload;
-
-  // The actual wire format is described in the .cpp file
-  // TODO replace all uses of uint8_t with std::byte everywhere
-  WirePacket Serialize() const;
-  static Packet Deserialize(std::span<uint8_t const> buffer);
-  void DeserializeInto(std::span<uint8_t const> buffer);
+  SessionPacketPayload payload;
 };
-
-inline bool operator==(const Packet &lhs, const Packet &rhs) {
+using SessionPacket = Packet<PacketType::kSession>;
+inline bool operator==(const Packet<PacketType::kSession> &lhs, const Packet<PacketType::kSession> &rhs) {
   return (lhs.id == rhs.id && lhs.type == rhs.type &&
           lhs.length == rhs.length && lhs.nesn == rhs.nesn &&
           lhs.sn == rhs.sn && lhs.payload == rhs.payload);
 }
 
-inline const char* TypeStr(Packet::Type t) {
+inline const char* TypeStr(Packet<PacketType::kSession>::SubType t) {
+  using P = Packet<PacketType::kSession>;
   switch (t) {
-  case Packet::kNack:
+  case P::kNack:
     return "<NACK>";
-  case Packet::kData:
+  case P::kData:
     return "<DATA>";
-  case Packet::kAdvertisement:
-    return "<ADVR>";
-  case Packet::kConnectionRequest:
+  case P::kConnectionRequest:
     return "<CNRQ>";
-  case Packet::kConnectionAccept:
+  case P::kConnectionAccept:
     return "<CNAC>";
   }
   assert(false && "Unknown Packet Type");
 }
 
+template <>
+struct Packet<PacketType::kAdvertising> {
+  static constexpr PacketType kType = PacketType::kAdvertising;
+
+  enum class Field {
+    kSourceAddress = 0,
+  };
+  static constexpr Field kFinalField = Field::kSourceAddress;
+
+  static constexpr PacketFieldInfo FieldMetadata(Field f) {
+    using Flag = PacketFieldFlags;
+    switch (f) {
+    case Field::kSourceAddress:
+      return {0, 32, Flag::kNone};
+    }
+    __builtin_trap();
+  }
+
+  const uint8_t* GetFieldPointer(Field f) const {
+    switch (f) {
+    case Field::kSourceAddress:
+      return reinterpret_cast<uint8_t const*>(&(source_address));
+    }
+    __builtin_trap();
+  }
+
+  uint8_t* GetFieldPointer(Field f) {
+    using ConstThis = const Packet<kType>*;
+    // this is legal because we know that the original type is non-const
+    return const_cast<uint8_t*>(const_cast<ConstThis>(this)->GetFieldPointer(f));
+  }
+
+  WireAddress source_address;
+};
+
+using AdvertisingPacket = Packet<PacketType::kAdvertising>;
+inline bool operator==(const Packet<PacketType::kAdvertising> &lhs, const Packet<PacketType::kAdvertising> &rhs) {
+  return (lhs.source_address == rhs.source_address);
+}
 
 } // namespace lora_chat

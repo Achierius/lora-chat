@@ -153,22 +153,22 @@ private:
 struct TextTag {
   const char *str;
 };
-using MakeMessageType = std::optional<lora_chat::WirePacketPayload> (*)();
+using MakeMessageType = std::optional<lora_chat::SessionPacketPayload> (*)();
 
 template <TextTag const &Tag>
-std::optional<lora_chat::WirePacketPayload> MakeMessage() {
-  lora_chat::WirePacketPayload p{0};
+std::optional<lora_chat::SessionPacketPayload> MakeMessage() {
+  lora_chat::SessionPacketPayload p{0};
 
   static std::atomic<int> i{0};
   std::stringstream ss{};
   ss << Tag.str << " " << i++;
   std::strcpy(reinterpret_cast<char *>(&p), ss.str().c_str());
 
-  return std::optional<lora_chat::WirePacketPayload>(p);
+  return std::optional<lora_chat::SessionPacketPayload>(p);
 }
 
 template <TextTag const &Tag>
-void ConsumeMessage([[maybe_unused]] lora_chat::WirePacketPayload &&msg) {
+void ConsumeMessage([[maybe_unused]] lora_chat::SessionPacketPayload &&msg) {
   constexpr bool kVerbose = false;
   if constexpr (kVerbose)
     printf("%s received message: \"%s\"\n", Tag.str,

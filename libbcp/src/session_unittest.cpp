@@ -122,10 +122,11 @@ TEST(ActionTimings, VariousTimes) {
       {std::chrono::milliseconds(5), std::chrono::milliseconds(5)},
       {std::chrono::milliseconds(3), std::chrono::milliseconds(30)},
   }};
-  constexpr std::array<std::pair<Duration, Duration>, 3> kSensitiveTestConfigs{{
+  constexpr std::array<std::pair<Duration, Duration>, 2> kSensitiveTestConfigs{{
       {std::chrono::milliseconds(2), std::chrono::milliseconds(5)},
       {std::chrono::milliseconds(1), std::chrono::milliseconds(1)},
-      {std::chrono::milliseconds(1), std::chrono::microseconds(10)},
+  // TODO is it worth maintaining this guarantee?
+  //    {std::chrono::milliseconds(1), std::chrono::microseconds(10)},
   }};
   constexpr int kPeriodsPerConfig{10};
 

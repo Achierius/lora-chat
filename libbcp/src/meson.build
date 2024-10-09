@@ -1,7 +1,6 @@
 bcp_sources = [
   'session.cpp',
   'lora_interface.cpp',
-  'packet.cpp',
   'protocol_agent.cpp',
 ]
 

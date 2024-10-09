@@ -12,6 +12,7 @@
 #include "radio_interface.hpp"
 #include "sequence_number.hpp"
 #include "time.hpp"
+#include "wire_packet.hpp"
 
 namespace lora_chat {
 
@@ -29,8 +30,8 @@ enum class AgentAction {
 class MessagePipe {
   // Any other asynchronous status update callbacks go here
 public:
-  using GetMessageFunc = std::optional<WirePacketPayload> (*)();
-  using ReceiveMessageFunc = void (*)(WirePacketPayload &&);
+  using GetMessageFunc = std::optional<SessionPacketPayload> (*)();
+  using ReceiveMessageFunc = void (*)(SessionPacketPayload &&);
 
   MessagePipe() : get_msg_(DontSendAMessage), recv_msg_(DropMessage) {}
 
@@ -40,15 +41,15 @@ public:
   MessagePipe(GetMessageFunc get_msg, ReceiveMessageFunc recv_msg)
       : get_msg_(get_msg), recv_msg_(recv_msg) {}
 
-  std::optional<WirePacketPayload> GetNextMessageToSend();
-  void DepositReceivedMessage(WirePacketPayload &&message);
+  std::optional<SessionPacketPayload> GetNextMessageToSend();
+  void DepositReceivedMessage(SessionPacketPayload &&message);
 
 private:
   GetMessageFunc get_msg_;
   ReceiveMessageFunc recv_msg_;
 
-  static std::optional<WirePacketPayload> DontSendAMessage() { return {}; }
-  static void DropMessage(WirePacketPayload &&) { return; }
+  static std::optional<SessionPacketPayload> DontSendAMessage() { return {}; }
+  static void DropMessage(SessionPacketPayload &&) { return; }
 };
 
 class Session {
@@ -178,8 +179,11 @@ private:
   /// thread: just spins until we hit it instead.
   void SleepUntil(TimePoint t) const;
 
-  void LogForPacket(Packet const &p, WirePacket const &w_p,
+  void LogForPacket(Packet<PacketType::kSession> const &p,
+                    NewWirePacket<PacketType::kSession> const &w_p,
                     const char *action) const;
+  void LogForPacket(Packet<PacketType::kSession> const &p,
+                    ReceiveBuffer const &buff, const char *action) const;
 
   static SequenceNumber InitFictitiousLastAckedSentSn(bool we_initiated);
   static SequenceNumber InitFictitiousPrevSentNesn(bool we_initiated);
@@ -196,9 +200,9 @@ private:
   SequenceNumber last_acked_sent_sn_;
   bool received_good_packet_in_last_receive_sequence_{true};
   // We buffer this so that we can retransmit it
-  Packet last_sent_packet_;
+  Packet<PacketType::kSession> last_sent_packet_;
   // We buffer this and only hand it back out when it's about to be overridden
-  WirePacketPayload last_recv_message_{};
+  SessionPacketPayload last_recv_message_{};
 
   int timeout_counter_{0};
   bool session_complete_{false};

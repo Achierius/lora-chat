@@ -10,13 +10,14 @@
 
 #include "clock.hpp"
 #include "sequence_number.hpp"
+#include "wire_packet.hpp"
 
 namespace lora_chat {
 
-std::optional<WirePacketPayload> MessagePipe::GetNextMessageToSend() {
+std::optional<SessionPacketPayload> MessagePipe::GetNextMessageToSend() {
   return get_msg_();
 }
-void MessagePipe::DepositReceivedMessage(WirePacketPayload &&message) {
+void MessagePipe::DepositReceivedMessage(SessionPacketPayload &&message) {
   return recv_msg_(std::move(message));
 }
 
@@ -126,14 +127,14 @@ AgentAction Session::SleepThroughNextGapTime() const {
 void Session::SleepUntilStartTime() const { SleepUntil(clock_.start_time()); }
 
 void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
-  Packet p{};
-  p.type = Packet::kNack;
+  SessionPacket p{};
+  p.type = SessionPacket::kNack;
   p.nesn = last_recv_sn_ + 1;
   p.sn = last_sent_packet_.sn;
   p.id = id_;
   p.length = 0;
 
-  auto w_p = p.Serialize();
+  auto w_p = Serialize(p);
   if constexpr (kLogLevel > kNone)
     LogForPacket(p, w_p, "Transmitted NACK");
   radio.Transmit(w_p);
@@ -141,8 +142,8 @@ void Session::TransmitNack(RadioInterface &radio, MessagePipe &pipe) {
 }
 
 void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
-  Packet &p = last_sent_packet_;
-  p.type = Packet::kData;
+  SessionPacket &p = last_sent_packet_;
+  p.type = SessionPacket::kData;
   p.nesn = last_recv_sn_ + 1;
   p.sn = last_acked_sent_sn_ + 1;
   p.id = id_;
@@ -155,7 +156,7 @@ void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
     p.length = 0;
   }
 
-  auto w_p = p.Serialize();
+  auto w_p = Serialize(p);
   if constexpr (kLogLevel > kNone)
     LogForPacket(p, w_p, "Transmitted");
   radio.Transmit(w_p);
@@ -164,19 +165,20 @@ void Session::TransmitNextMessage(RadioInterface &radio, MessagePipe &pipe) {
 void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
   received_good_packet_in_last_receive_sequence_ = false;
   ReceiveBuffer buff{};
-  WirePacket &w_p = buff.packet;
   // TODO repeat receive until we get the proper session id
   // TODO enforce timeout according to how long we're supposed to receive for
-  auto status = radio.Receive(buff.Span());
+  auto status = radio.Receive(buff.span());
   if (status != RadioInterface::Status::kSuccess) {
     // TODO do we need to do anything special for bad packets?
     return;
   }
   received_good_packet_in_last_receive_sequence_ = true;
   timeout_counter_ = 0;
-  Packet p{Packet::Deserialize(w_p)};
+  auto maybe_p {Deserialize<PacketType::kSession>(buff)};
+  if (!maybe_p) return; // Not a session packet -- TODO handle control packets?
+  SessionPacket p = maybe_p.value();
   if constexpr (kLogLevel > kNone)
-    LogForPacket(p, w_p, "Received");
+    LogForPacket(p, buff, "Received");
 
   if (p.nesn == static_cast<SequenceNumber>(last_sent_packet_.sn + 1)) {
     last_acked_sent_sn_ = last_sent_packet_.sn;
@@ -193,7 +195,7 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
       last_recv_message_ = std::move(p.payload);
     }
     last_recv_sn_ = p.sn;
-  } else if (p.type == Packet::kNack && p.nesn == last_sent_packet_.sn) {
+  } else if (p.type == SessionPacket::kNack && p.nesn == last_sent_packet_.sn) {
     // If p.nesn matches but p.type != kNack, it's a reflected/desync'd data msg
     // If p.type is kNack but p.nesn is something else, same but a nack
 
@@ -206,7 +208,7 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
 
 void Session::RetransmitMessage(RadioInterface &radio, MessagePipe &pipe) {
   // TODO how to handle it when they nack our nack?
-  auto w_p = last_sent_packet_.Serialize();
+  auto w_p = Serialize(last_sent_packet_);
   if constexpr (kLogLevel > kNone)
     LogForPacket(last_sent_packet_, w_p, "Retransmitted");
   radio.Transmit(w_p);
@@ -233,8 +235,8 @@ void Session::SleepUntil(TimePoint t) const {
   }
 }
 
-void Session::LogForPacket(Packet const &p,
-                           [[maybe_unused]] WirePacket const &w_p,
+void Session::LogForPacket(SessionPacket const &p,
+                           [[maybe_unused]] WireSessionPacket const &w_p,
                            const char *action) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     auto tid = gettid();
@@ -255,9 +257,21 @@ void Session::LogForPacket(Packet const &p,
       printf("]\n");
     }
     if constexpr (kLogLevel >= kLogPacketAscii) {
-      if (p.type == Packet::kData)
+      if (p.type == SessionPacket::kData)
         printf("%s\"%s\"\n", kIndent, p.payload.data());
     }
+  }
+}
+
+void Session::LogForPacket(SessionPacket const &p,
+                           [[maybe_unused]] ReceiveBuffer const&buff,
+                           const char *action) const {
+  if constexpr (kLogLevel >= kLogPacketMetadata) {
+    // TODO actually include the packet type in our logging
+    NewWirePacket<PacketType::kSession> w_p {};
+    // TODO this is a horrible abstraction violation
+    std::memcpy(&w_p, buff.data() + (kWirePacketTagBits / 8), sizeof(w_p));
+    LogForPacket(p, w_p, action);
   }
 }
 

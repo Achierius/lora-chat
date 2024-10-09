@@ -16,7 +16,7 @@ namespace lora_chat {
 
 class ProtocolAgent {
 private:
-  using Id = WireSessionId;
+  using Address = WireAddress;
   enum class ProtocolState {
     kDispatch,
     kPend,
@@ -64,8 +64,8 @@ public:
     kSeekAndAdvertiseConnection,
   };
 
-  ProtocolAgent(Id id, RadioInterface &radio, MessagePipe pipe)
-      : id_(id), radio_(radio), pipe_(pipe) {}
+  ProtocolAgent(Address addr, RadioInterface &radio, MessagePipe pipe)
+      : address_(addr), radio_(radio), pipe_(pipe) {}
 
   void ExecuteAgentAction();
 
@@ -80,7 +80,7 @@ private:
     kLogPacketMetadata,
     kLogPacketBytes,
   };
-  static constexpr LogLevel kLogLevel{kNone};
+  static constexpr LogLevel kLogLevel{kLogPacketBytes};
 
   static constexpr Duration kHandshakeLeadTime{std::chrono::milliseconds(100)};
   static constexpr auto kBaseAdvertisingInterval =
@@ -103,12 +103,15 @@ private:
   static constexpr auto kHardcodedSleepTime = std::chrono::milliseconds(200);
 
   void LogStr(const char* format, ...) const;
-  void LogPacket(Packet const &p, [[maybe_unused]] WirePacket const &w_p,
+  void LogPacket(Packet<PacketType::kSession> const &p, [[maybe_unused]] std::span<const uint8_t> w_p,
                  const char *action) const;
+  void LogPacket(Packet<PacketType::kAdvertising> const &p, [[maybe_unused]] std::span<const uint8_t> w_p,
+                 const char *action) const;
+
   const char *StateStr(ProtocolState s) const;
   void ChangeState(ProtocolState new_state);
 
-  std::pair<RadioInterface::Status, WirePacket> ReceivePacket();
+  std::pair<RadioInterface::Status, ReceiveBuffer> ReceivePacket();
 
   void DispatchNextState();
   void Pend();
@@ -119,7 +122,7 @@ private:
   void ExecuteHandshakeFromSeek();
   void ExecuteSession();
 
-  Id id_;
+  Address address_;
 
   std::reference_wrapper<RadioInterface> radio_;
   MessagePipe pipe_;

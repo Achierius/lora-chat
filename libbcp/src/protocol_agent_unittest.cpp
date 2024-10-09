@@ -100,15 +100,18 @@ TEST(ActionOrdering, AdvertiseAndSeek) {
 
 TEST(ActionOrdering, AdvertiseSuccess) {
   using ProtocolAgent = lora_chat::ProtocolAgent;
-  using Packet = lora_chat::Packet;
+  using PacketType = lora_chat::PacketType;
+  using Packet = lora_chat::Packet<PacketType::kSession>;  // TODO should be a
+                                                           // new type
   using Status = lora_chat::RadioInterface::Status;
   using Goal = ProtocolAgent::ConnectionGoal;
+  using lora_chat::Serialize;
 
   auto send_conreq = [](std::span<uint8_t> out) {
     Packet p{};
     p.type = Packet::kConnectionRequest;
     p.id = 3;
-    auto w_p = p.Serialize();
+    auto w_p = Serialize(p);
     assert(out.size_bytes() >= w_p.size());
     std::copy(w_p.begin(), w_p.end(), out.begin());
     return Status::kSuccess;
@@ -129,15 +132,16 @@ TEST(ActionOrdering, AdvertiseSuccess) {
 
 TEST(ActionOrdering, SeekSuccess) {
   using ProtocolAgent = lora_chat::ProtocolAgent;
-  using Packet = lora_chat::Packet;
+  using PacketType = lora_chat::PacketType;
+  using Packet = lora_chat::Packet<PacketType::kAdvertising>;
   using Status = lora_chat::RadioInterface::Status;
   using Goal = ProtocolAgent::ConnectionGoal;
+  using lora_chat::Serialize;
 
   auto send_advert = [](std::span<uint8_t> out) {
     Packet p{};
-    p.type = Packet::kAdvertisement;
-    p.id = 3;
-    auto w_p = p.Serialize();
+    p.source_address = 3;
+    auto w_p = Serialize(p);
     assert(out.size_bytes() >= w_p.size());
     std::copy(w_p.begin(), w_p.end(), out.begin());
     return Status::kSuccess;

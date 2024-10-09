@@ -1,23 +1,60 @@
 #include "packet.hpp"
+#include "wire_packet.hpp"
 
 #include "gtest/gtest.h"
 
+#include <sstream>
+
 namespace {
 
+template <lora_chat::PacketType Pt>
+bool SimulateRadioTransmission(lora_chat::ReceiveBuffer &dest,
+                               lora_chat::NewWirePacket<Pt> const &src) {
+  if (src.size() > dest.size()) return false;
+
+  std::memcpy(dest.data(), src.data(), src.size());
+  return true;
+}
+
 TEST(SerDe, Basic) {
-  using Packet = lora_chat::Packet;
+  using PType = lora_chat::PacketType;
+  using Packet = lora_chat::Packet<PType::kSession>;
+  using ReceiveBuffer = lora_chat::ReceiveBuffer;
+  using lora_chat::Deserialize;
+  using lora_chat::Serialize;
+
   Packet p1{};
-  EXPECT_EQ(p1, Packet::Deserialize(p1.Serialize()));
+  auto wp_1 = Serialize(p1);
+  ReceiveBuffer buff_1{};
+  ASSERT_TRUE(SimulateRadioTransmission<PType::kSession>(buff_1, wp_1));
+  std::memcpy(buff_1.data(), wp_1.data(), wp_1.size());
+  auto wp_1_deser = Deserialize<PType::kSession>(buff_1);
+  ASSERT_TRUE(wp_1_deser.has_value());
 
   p1.sn = lora_chat::SequenceNumber(1);
   p1.length = 2;
-  EXPECT_EQ(p1, Packet::Deserialize(p1.Serialize()));
+  auto wp_2 = Serialize(p1);
+  ReceiveBuffer buff_2{};
+  ASSERT_TRUE(SimulateRadioTransmission<PType::kSession>(buff_2, wp_2));
+  auto wp_2_deser = Deserialize<PType::kSession>(buff_2);
+  ASSERT_TRUE(wp_2_deser.has_value());
+  EXPECT_EQ(p1, *wp_2_deser);
+}
+
+__attribute__((noinline)) int TestFunc() {
+  volatile int x = 3;
+  return x;
 }
 
 TEST(SerDe, Chained) {
-  using Packet = lora_chat::Packet;
-  using WirePacket = lora_chat::WirePacket;
+  using PType = lora_chat::PacketType;
+  using Packet = lora_chat::Packet<PType::kSession>;
+  using lora_chat::Deserialize;
+  using lora_chat::Serialize;
+  using WirePacket = lora_chat::NewWirePacket<PType::kSession>;
   using Sn = lora_chat::SequenceNumber;
+
+  lora_chat::ReceiveBuffer recv_buff{};
 
   Packet p1{
       .id = 0xAAAAAAAA,
@@ -27,15 +64,20 @@ TEST(SerDe, Chained) {
       .sn = Sn(0xCC),
       .payload{0xFF},
   };
-  const WirePacket p1_wire = p1.Serialize();
+  const WirePacket p1_wire = Serialize(p1);
+  ASSERT_TRUE(SimulateRadioTransmission<PType::kSession>(recv_buff, p1_wire));
 
-  Packet p2{Packet::Deserialize(p1_wire)};
-  const WirePacket p2_wire = p2.Serialize();
+  auto maybe_p2 = Deserialize<PType::kSession>(recv_buff);
+  ASSERT_TRUE(maybe_p2.has_value());
+  Packet p2(*maybe_p2);
+  const WirePacket p2_wire = Serialize(p2);
+  ASSERT_TRUE(SimulateRadioTransmission<PType::kSession>(recv_buff, p2_wire));
 
-  Packet p3{};
-  p3.DeserializeInto(p2_wire);
+  auto maybe_p3 = Deserialize<PType::kSession>(recv_buff);
+  ASSERT_TRUE(maybe_p3.has_value());
+  Packet p3(*maybe_p3);
 
-  using Field = lora_chat::PacketField;
+  using Field = Packet::Field;
   for (int i = 0; i <= static_cast<int>(Field::kPayload); i++) {
     // Not super useful but it does make sure we catch any new additions to the
     // PacketField enum, if nothing else
@@ -76,6 +118,34 @@ TEST(SerDe, Chained) {
   EXPECT_NE(p1, p2);
   EXPECT_NE(p1, p3);
   EXPECT_EQ(p2, p3);
+}
+
+TEST(SerDe, FailOnBadTag) {
+  using PType = lora_chat::PacketType;
+  using Packet = lora_chat::Packet<PType::kSession>;
+  using lora_chat::Deserialize;
+  using lora_chat::Serialize;
+  using WirePacket = lora_chat::NewWirePacket<PType::kSession>;
+  using Sn = lora_chat::SequenceNumber;
+
+  Packet packet{
+      .id = 0xAAAAAAAA,
+      .type = Packet::kNack,
+      .length = 0xDD,
+      .nesn = Sn(0xBB),
+      .sn = Sn(0xCC),
+      .payload{0xFF},
+  };
+  WirePacket wire_packet = Serialize(packet);
+  lora_chat::ReceiveBuffer recv_buff{};
+  ASSERT_TRUE(SimulateRadioTransmission<PType::kSession>(recv_buff, wire_packet));
+  EXPECT_TRUE(Deserialize<PType::kSession>(recv_buff).has_value());
+
+  // Now muck up the tag and make sure it doesn't still deserialize
+  static_assert(lora_chat::kWirePacketTagBits == 8);
+  char bad_tag = static_cast<char>(PType::kSession) + 1;
+  std::memset(recv_buff.data(), bad_tag, 1);
+  EXPECT_FALSE(Deserialize<PType::kSession>(recv_buff).has_value());
 }
 
 } // namespace

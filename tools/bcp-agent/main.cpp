@@ -9,16 +9,16 @@ using namespace lora_chat;
 
 static int kNextMessageId{0};
 
-std::optional<WirePacketPayload> GetMessageToSend() {
+std::optional<SessionPacketPayload> GetMessageToSend() {
   std::stringstream ss {};
   ss << "Ping " << kNextMessageId++;
   auto str = ss.str();
-  WirePacketPayload p{};
+  SessionPacketPayload p{};
   std::copy(str.begin(), str.end(), p.begin());
   return p;
 }
 
-void ConsumeMessage(WirePacketPayload &&payload) {
+void ConsumeMessage(SessionPacketPayload &&payload) {
   printf("Message received \"%s\"\n",
       payload.data());
 }
