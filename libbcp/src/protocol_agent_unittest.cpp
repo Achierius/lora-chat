@@ -99,21 +99,21 @@ TEST(ActionOrdering, AdvertiseAndSeek) {
 }
 
 TEST(ActionOrdering, AdvertiseSuccess) {
-  using ProtocolAgent = lora_chat::ProtocolAgent;
-  using PacketType = lora_chat::PacketType;
-  using Packet = lora_chat::Packet<PacketType::kSession>;  // TODO should be a
-                                                           // new type
+  using lora_chat::ProtocolAgent;
+  using lora_chat::PacketType;
+  using lora_chat::Packet;
   using Status = lora_chat::RadioInterface::Status;
   using Goal = ProtocolAgent::ConnectionGoal;
   using lora_chat::Serialize;
 
   auto send_conreq = [](std::span<uint8_t> out) {
-    Packet p{};
-    p.type = Packet::kConnectionRequest;
-    p.id = 3;
-    auto w_p = Serialize(p);
-    assert(out.size_bytes() >= w_p.size());
-    std::copy(w_p.begin(), w_p.end(), out.begin());
+    Packet<PacketType::kConnectionRequest> request{};
+    request.source_address = 100;
+    request.target_address = 200;
+
+    auto w_request = Serialize(request);
+    assert(out.size_bytes() >= w_request.size());
+    std::copy(w_request.begin(), w_request.end(), out.begin());
     return Status::kSuccess;
   };
   CountingRadio radio{true, send_conreq, std::chrono::milliseconds(50)};

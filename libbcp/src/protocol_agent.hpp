@@ -107,6 +107,10 @@ private:
                  const char *action) const;
   void LogPacket(Packet<PacketType::kAdvertising> const &p, [[maybe_unused]] std::span<const uint8_t> w_p,
                  const char *action) const;
+  void LogPacket(Packet<PacketType::kConnectionRequest> const &p, [[maybe_unused]] std::span<const uint8_t> w_p,
+                 const char *action) const;
+  void LogPacket(Packet<PacketType::kConnectionAccept> const &p, [[maybe_unused]] std::span<const uint8_t> w_p,
+                 const char *action) const;
 
   const char *StateStr(ProtocolState s) const;
   void ChangeState(ProtocolState new_state);

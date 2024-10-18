@@ -41,11 +41,6 @@ TEST(SerDe, Basic) {
   EXPECT_EQ(p1, *wp_2_deser);
 }
 
-__attribute__((noinline)) int TestFunc() {
-  volatile int x = 3;
-  return x;
-}
-
 TEST(SerDe, Chained) {
   using PType = lora_chat::PacketType;
   using Packet = lora_chat::Packet<PType::kSession>;

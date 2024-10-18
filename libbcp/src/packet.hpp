@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "time.hpp"
 #include "sequence_number.hpp"
 #include "sx1276/sx1276.hpp"
 
@@ -20,6 +21,8 @@ using SessionPacketPayload = std::array<uint8_t, kSessionPacketPayloadBytes>;
 
 enum class PacketType : uint8_t {
   kSession = 0,
+  kConnectionRequest,
+  kConnectionAccept,
   kAdvertising,
 };
 constexpr PacketType kFinalPacketType = PacketType::kAdvertising;
@@ -174,6 +177,113 @@ struct Packet<PacketType::kAdvertising> {
 using AdvertisingPacket = Packet<PacketType::kAdvertising>;
 inline bool operator==(const Packet<PacketType::kAdvertising> &lhs, const Packet<PacketType::kAdvertising> &rhs) {
   return (lhs.source_address == rhs.source_address);
+}
+
+template <>
+struct Packet<PacketType::kConnectionRequest> {
+  static constexpr PacketType kType = PacketType::kConnectionRequest;
+
+  enum class Field {
+    kSourceAddress = 0,
+    kTargetAddress,
+  };
+  static constexpr Field kFinalField = Field::kTargetAddress;
+
+  static constexpr PacketFieldInfo FieldMetadata(Field f) {
+    using Flag = PacketFieldFlags;
+    switch (f) {
+    case Field::kSourceAddress:
+      return {0, 32, Flag::kNone};
+    case Field::kTargetAddress:
+      return {32, 32, Flag::kNone};
+    }
+    __builtin_trap();
+  }
+
+  const uint8_t* GetFieldPointer(Field f) const {
+    switch (f) {
+    case Field::kSourceAddress:
+      return reinterpret_cast<uint8_t const*>(&(source_address));
+    case Field::kTargetAddress:
+      return reinterpret_cast<uint8_t const*>(&(target_address));
+      break;
+    }
+    __builtin_trap();
+  }
+
+  uint8_t* GetFieldPointer(Field f) {
+    using ConstThis = const Packet<kType>*;
+    // this is legal because we know that the original type is non-const
+    return const_cast<uint8_t*>(const_cast<ConstThis>(this)->GetFieldPointer(f));
+  }
+
+  WireAddress source_address;
+  WireAddress target_address;
+};
+
+inline bool operator==(const Packet<PacketType::kConnectionRequest> &lhs, const Packet<PacketType::kConnectionRequest> &rhs) {
+  return (lhs.source_address == rhs.source_address && lhs.target_address == rhs.target_address);
+}
+
+template <>
+struct Packet<PacketType::kConnectionAccept> {
+  static constexpr PacketType kType = PacketType::kConnectionAccept;
+
+  enum class Field {
+    kSourceAddress = 0,
+    kTargetAddress,
+    kSessionStartTime,
+    kSessionId,
+    // TODO specify and hop to a new frequency
+  };
+  static constexpr Field kFinalField = Field::kSessionId;
+
+  static constexpr PacketFieldInfo FieldMetadata(Field f) {
+    using Flag = PacketFieldFlags;
+    switch (f) {
+    case Field::kSourceAddress:
+      return {0, 32, Flag::kNone};
+    case Field::kTargetAddress:
+      return {32, 32, Flag::kNone};
+    case Field::kSessionStartTime:
+      return {64, 8 * sizeof(WireTimePoint), Flag::kNone};
+    case Field::kSessionId:
+      return {128,  8 * sizeof(WireSessionId), Flag::kNone};
+    }
+    __builtin_trap();
+  }
+
+  const uint8_t* GetFieldPointer(Field f) const {
+    switch (f) {
+    case Field::kSourceAddress:
+      return reinterpret_cast<uint8_t const*>(&(source_address));
+    case Field::kTargetAddress:
+      return reinterpret_cast<uint8_t const*>(&(target_address));
+    case Field::kSessionStartTime:
+      return reinterpret_cast<uint8_t const*>(&(session_start_time));
+    case Field::kSessionId:
+      return reinterpret_cast<uint8_t const*>(&(session_id));
+    }
+    __builtin_trap();
+  }
+
+  uint8_t* GetFieldPointer(Field f) {
+    using ConstThis = const Packet<kType>*;
+    // this is legal because we know that the original type is non-const
+    return const_cast<uint8_t*>(const_cast<ConstThis>(this)->GetFieldPointer(f));
+  }
+
+  WireAddress source_address;
+  WireAddress target_address;
+  WireTimePoint session_start_time;  // TODO hold a deserialized TimePoint
+  WireSessionId session_id;
+};
+
+inline bool operator==(const Packet<PacketType::kConnectionAccept> &lhs, const Packet<PacketType::kConnectionAccept> &rhs) {
+  return (lhs.source_address == rhs.source_address &&
+          lhs.target_address == rhs.target_address &&
+          lhs.session_start_time == rhs.session_start_time &&
+          lhs.session_id == rhs.session_id);
 }
 
 } // namespace lora_chat

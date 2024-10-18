@@ -110,11 +110,48 @@ void ProtocolAgent::LogPacket(Packet<PacketType::kSession> const &p,
 void ProtocolAgent::LogPacket(Packet<PacketType::kAdvertising> const &p,
                               [[maybe_unused]] std::span<const uint8_t> w_p,
                               const char *action) const {
-  // TODO SPECIALIZE LOGGING BY PACKET TYPE
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     const char *kIndent = "        ";
-    LogStr("%s Advertising packet from 0x%x \n",
+    LogStr("%s Advertising packet from 0x%08x\n",
            action, p.source_address);
+
+    if constexpr (kLogLevel >= kLogPacketBytes) {
+      printf("%s[ ", kIndent);
+      for (uint8_t i = 0; i < w_p.size(); i++) {
+        printf("%02x ", w_p[i]);
+      }
+      printf("]\n");
+    }
+  }
+}
+
+void ProtocolAgent::LogPacket(Packet<PacketType::kConnectionRequest> const &p,
+                              [[maybe_unused]] std::span<const uint8_t> w_p,
+                              const char *action) const {
+  if constexpr (kLogLevel >= kLogPacketMetadata) {
+    const char *kIndent = "        ";
+    LogStr("%s Connection-Request packet from 0x%08x\n",
+           action, p.source_address);
+
+    if constexpr (kLogLevel >= kLogPacketBytes) {
+      printf("%s[ ", kIndent);
+      for (uint8_t i = 0; i < w_p.size(); i++) {
+        printf("%02x ", w_p[i]);
+      }
+      printf("]\n");
+    }
+  }
+}
+
+void ProtocolAgent::LogPacket(Packet<PacketType::kConnectionAccept> const &p,
+                              [[maybe_unused]] std::span<const uint8_t> w_p,
+                              const char *action) const {
+  if constexpr (kLogLevel >= kLogPacketMetadata) {
+    const char *kIndent = "        ";
+    LogStr("%s Connection-Accept packet from 0x%08x\n"
+           "%s  session-id will be %u\n",
+           action, p.source_address, kIndent, p.session_id);
+    // TODO log start-time & frequency
 
     if constexpr (kLogLevel >= kLogPacketBytes) {
       printf("%s[ ", kIndent);
@@ -214,13 +251,10 @@ void ProtocolAgent::Seek() {
 }
 
 void ProtocolAgent::RequestConnection() {
-  // First we broadcast the request
-  // TODO should have separate packet type for conn-req, con-acc
-  using ConnReqPacketT = Packet<PacketType::kSession>;
-  using ConnAccPacketT = Packet<PacketType::kSession>;
-  ConnReqPacketT conn_req{};
-  conn_req.type = ConnReqPacketT::SubType::kConnectionRequest;
-  conn_req.id = address_;
+  Packet<PacketType::kConnectionRequest> conn_req{};
+  conn_req.source_address = address_;
+  conn_req.target_address = 0; // TODO plumb in target-addr
+
   auto w_conn_req = Serialize(conn_req);
   auto status = radio_.get().Transmit(w_conn_req);
   assert(status == RadioInterface::Status::kSuccess); // TODO handle err
@@ -235,29 +269,26 @@ void ProtocolAgent::RequestConnection() {
       LogStr("failed to receive connection-accept: %d", status);
       continue;
     }
-    auto maybe_response = Deserialize<ConnAccPacketT::kType>(w_p);
+    auto maybe_response = Deserialize<PacketType::kConnectionAccept>(w_p);
     if (!maybe_response) continue;
     auto response = maybe_response.value();
 
     if constexpr (kLogLevel > kNone)
       LogPacket(response, w_p.span(), "Received");
-    if (response.type == ConnAccPacketT::kConnectionAccept) {
-      // TODO confirm they're the party we expect
-      // The payload contains our session's start time
-      assert(response.length == sizeof(WireTimePoint));
-      WireTimePoint wire_time{};
-      std::memcpy(&wire_time, &response.payload, sizeof(wire_time));
-      TimePoint start_time(DeserializeWireTime(wire_time));
-      session_.emplace(start_time, address_, kHardcodedTransmissionTime,
-                       kHardcodedSleepTime, false);
-      // Success!
-      ChangeState(ProtocolState::kExecuteSession);
-      session_->SleepUntilStartTime();
-      return;
-    }
+    // TODO confirm they're the party we expect
+
+    TimePoint start_time(DeserializeWireTime(response.session_start_time));
+    session_.emplace(start_time, address_, kHardcodedTransmissionTime,
+                     kHardcodedSleepTime, false);
+    // Success!
+    ChangeState(ProtocolState::kExecuteSession);
+    session_->SleepUntilStartTime();
+    return;
   } while (Now() - receive_begin < kHandshakeReceiveDuration);
 
   // Disappointment: no response
+  if constexpr (kLogLevel > kNone)
+    LogStr("connection-request failed", status);
   ChangeState(ProtocolState::kDispatch);
 }
 
@@ -271,25 +302,21 @@ void ProtocolAgent::Advertise() {
   if constexpr (kLogLevel >= kLogPacketMetadata)
     LogPacket(advert, w_advert, "Transmitted");
 
-  using ConnReqPacketT = Packet<PacketType::kSession>;
-
   // Then we wait for the result
   auto receive_begin = Now();
   do {
     auto [status, w_p] = ReceivePacket();
     if (status != RadioInterface::Status::kSuccess)
       continue;
-    auto maybe_response = Deserialize<ConnReqPacketT::kType>(w_p);
+    auto maybe_response = Deserialize<PacketType::kConnectionRequest>(w_p);
     if (!maybe_response) continue;
 
+    // Success: got a fish!
     auto response = maybe_response.value();
     if constexpr (kLogLevel > kNone)
       LogPacket(response, w_p.span(), "Received");
-    if (response.type == ConnReqPacketT::kConnectionRequest) {
-      // Success: got a fish!
-      ChangeState(ProtocolState::kExecuteHandshakeFromAdvertise);
-      return;
-    }
+    ChangeState(ProtocolState::kExecuteHandshakeFromAdvertise);
+    return;
   } while (Now() - receive_begin < kConnectionRequestInterval);
 
   // Disappointment: empty line
@@ -297,24 +324,20 @@ void ProtocolAgent::Advertise() {
 }
 
 void ProtocolAgent::AcceptConnection() {
-  using ConnAccPacketT = Packet<PacketType::kSession>;
-  ConnAccPacketT p{};
-  p.type = ConnAccPacketT::kConnectionAccept;
-  p.id = address_;
-  p.length = sizeof(WireTimePoint);
+  Packet<PacketType::kConnectionAccept> accept{};
+  accept.source_address = address_;
+  accept.target_address = 0;  // TODO pipe in target address
+  accept.session_start_time = GetFutureWireTime(kHandshakeLeadTime);
+  accept.session_id = address_;  // TODO generate session IDs
 
-  WireTimePoint wire_start_time =
-      GetFutureWireTime(kHandshakeLeadTime);
-  std::memcpy(&p.payload, &wire_start_time, sizeof(wire_start_time));
-
-  auto start_time = DeserializeWireTime(wire_start_time);
+  auto start_time = DeserializeWireTime(accept.session_start_time);
   session_.emplace(start_time, address_, kHardcodedTransmissionTime,
                    kHardcodedSleepTime, true);
 
-  auto w_p = Serialize(p);
+  auto w_accept = Serialize(accept);
   if constexpr (kLogLevel >= kLogPacketMetadata)
-    LogPacket(p, w_p, "Transmitted");
-  auto status = radio_.get().Transmit(w_p);
+    LogPacket(accept, w_accept, "Transmitted");
+  auto status = radio_.get().Transmit(w_accept);
   if (status != RadioInterface::Status::kSuccess) {
     // TODO retry sending connection-accept instead of just giving up
     ChangeState(ProtocolState::kPend);

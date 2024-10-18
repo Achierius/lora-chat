@@ -103,9 +103,13 @@ constexpr bool AllFieldInvariantsAreSatisfied() {
 // TODO make this iterate over all packet-types rather than hardcoding instances
 static_assert(AllFieldInvariantsAreSatisfied<PacketType::kSession>());
 static_assert(AllFieldInvariantsAreSatisfied<PacketType::kAdvertising>());
+static_assert(AllFieldInvariantsAreSatisfied<PacketType::kConnectionAccept>());
+static_assert(AllFieldInvariantsAreSatisfied<PacketType::kConnectionRequest>());
 static_assert(WirePacketWidthBytes<PacketType::kSession>() <= SX127x_FIFO_CAPACITY);
 static_assert(WirePacketWidthBytes<PacketType::kAdvertising>() <= SX127x_FIFO_CAPACITY);
-static_assert(static_cast<size_t>(kFinalPacketType) == 1);  // As a reminder
+static_assert(WirePacketWidthBytes<PacketType::kConnectionAccept>() <= SX127x_FIFO_CAPACITY);
+static_assert(WirePacketWidthBytes<PacketType::kConnectionRequest>() <= SX127x_FIFO_CAPACITY);
+static_assert(static_cast<size_t>(kFinalPacketType) == 3);  // As a reminder
                                                             // until I
                                                             // un-hard-code this
 
@@ -196,7 +200,7 @@ std::optional<Packet<Pt>> DeserializeImpl(std::span<uint8_t const> bytes) {
   Packet packet{};
 
   // All fields are byte-aligned for now so just do a simple copy
-  for (size_t i = 0; i <= static_cast<size_t>(Packet::kFinalField); i++) {
+  for (size_t i = 0; i <= static_cast<size_t>(kFinalField); i++) {
     auto f = static_cast<Field>(i);
     auto m = Packet::FieldMetadata(f);
     assert((m.starting_bit + kBitOffset) % 8 == 0);  // TODO allow
