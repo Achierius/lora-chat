@@ -1,9 +1,6 @@
 From 2024-10-18:
     - Implement a dual advertise-seek mode
         - Add randomization to the dual advertise-seek mode to prevent overlap
-    - Adjust ProtocolAgent to discriminate based on source-id, and Sessions to discriminate based on session-id
-        - Need to plumb target-id between states in the PAgent state machine
-        - Don't forget a test!!
     - Adjust the lora library to allow for different configuration settings (perhaps just meshtastic presets?)
     - Do ToA computation inside libsx1276 (just hardcode functions per preset ^ ?)
     - Fix the 1-2 blank messages received at the start of each session

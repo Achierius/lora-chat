@@ -172,13 +172,20 @@ void Session::ReceiveMessage(RadioInterface &radio, MessagePipe &pipe) {
     // TODO do we need to do anything special for bad packets?
     return;
   }
-  received_good_packet_in_last_receive_sequence_ = true;
-  timeout_counter_ = 0;
-  auto maybe_p {Deserialize<PacketType::kSession>(buff)};
-  if (!maybe_p) return; // Not a session packet -- TODO handle control packets?
+  auto maybe_p{Deserialize<PacketType::kSession>(buff)};
+  if (!maybe_p)
+    return; // Not a session packet -- TODO handle control packets?
+
   SessionPacket p = maybe_p.value();
+  if (p.id != id_)
+    return; // Not for us
+
+  // TODO Also log session packets which were received but not for us??
   if constexpr (kLogLevel > kNone)
     LogForPacket(p, buff, "Received");
+
+  received_good_packet_in_last_receive_sequence_ = true;
+  timeout_counter_ = 0;
 
   if (p.nesn == static_cast<SequenceNumber>(last_sent_packet_.sn + 1)) {
     last_acked_sent_sn_ = last_sent_packet_.sn;
@@ -264,11 +271,11 @@ void Session::LogForPacket(SessionPacket const &p,
 }
 
 void Session::LogForPacket(SessionPacket const &p,
-                           [[maybe_unused]] ReceiveBuffer const&buff,
+                           [[maybe_unused]] ReceiveBuffer const &buff,
                            const char *action) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     // TODO actually include the packet type in our logging
-    NewWirePacket<PacketType::kSession> w_p {};
+    NewWirePacket<PacketType::kSession> w_p{};
     // TODO this is a horrible abstraction violation
     std::memcpy(&w_p, buff.data() + (kWirePacketTagBits / 8), sizeof(w_p));
     LogForPacket(p, w_p, action);
@@ -277,7 +284,8 @@ void Session::LogForPacket(SessionPacket const &p,
 
 AgentAction
 Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_state) const {
-  if (session_complete_) return AgentAction::kSessionComplete;
+  if (session_complete_)
+    return AgentAction::kSessionComplete;
 
   switch (supposed_state) {
   case TransmissionState::kInactive:
@@ -291,7 +299,8 @@ Session::WhatToDoIgnoringCurrentTime(TransmissionState supposed_state) const {
   // If we received no messages since our last transmission, NACK so that
   // the counterparty retransmits
   if (!received_good_packet_in_last_receive_sequence_)
-    return(timeout_counter_ <= kTimeoutLimit) ? AgentAction::kTransmitNack : AgentAction::kTerminateSession;
+    return (timeout_counter_ <= kTimeoutLimit) ? AgentAction::kTransmitNack
+                                               : AgentAction::kTerminateSession;
 
   // Decide what to transmit
   // this is what we would expect the sn to be if we got a message during the

@@ -314,4 +314,6 @@ TEST(PingPong, OneSidedFailures) {
   ponger_thread.join();
 }
 
+// TODO test that two sessions can coexist on the same link
+
 } // namespace

@@ -73,7 +73,7 @@ void ProtocolAgent::ExecuteAgentAction() {
   }
 }
 
-void ProtocolAgent::LogStr(const char* format, ...) const {
+void ProtocolAgent::LogStr(const char *format, ...) const {
   char buffer[512];
 
   va_list args;
@@ -86,15 +86,14 @@ void ProtocolAgent::LogStr(const char* format, ...) const {
   printf("(t%07d: ProtocolAgent) %s\n", gettid(), buffer);
 }
 
-
 void ProtocolAgent::LogPacket(Packet<PacketType::kSession> const &p,
                               [[maybe_unused]] std::span<const uint8_t> w_p,
-                              const char *action) const {
+                              const char *action, const char *addendum) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     const char *kIndent = "        ";
-    LogStr("%s Session packet %s (len %u)\n"
+    LogStr("%s Session packet %s (len %u) %s"
            "%s  sn %03u,  nesn %03u\n",
-           action, TypeStr(p.type), p.length, kIndent, p.sn.value,
+           action, TypeStr(p.type), p.length, addendum, kIndent, p.sn.value,
            p.nesn.value);
 
     if constexpr (kLogLevel >= kLogPacketBytes) {
@@ -109,11 +108,11 @@ void ProtocolAgent::LogPacket(Packet<PacketType::kSession> const &p,
 
 void ProtocolAgent::LogPacket(Packet<PacketType::kAdvertising> const &p,
                               [[maybe_unused]] std::span<const uint8_t> w_p,
-                              const char *action) const {
+                              const char *action, const char *addendum) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     const char *kIndent = "        ";
-    LogStr("%s Advertising packet from 0x%08x\n",
-           action, p.source_address);
+    LogStr("%s Advertising packet from 0x%08x %s", action, p.source_address,
+           addendum);
 
     if constexpr (kLogLevel >= kLogPacketBytes) {
       printf("%s[ ", kIndent);
@@ -127,11 +126,11 @@ void ProtocolAgent::LogPacket(Packet<PacketType::kAdvertising> const &p,
 
 void ProtocolAgent::LogPacket(Packet<PacketType::kConnectionRequest> const &p,
                               [[maybe_unused]] std::span<const uint8_t> w_p,
-                              const char *action) const {
+                              const char *action, const char *addendum) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     const char *kIndent = "        ";
-    LogStr("%s Connection-Request packet from 0x%08x\n",
-           action, p.source_address);
+    LogStr("%s Connection-Request packet from 0x%08x to 0x%08x %s", action,
+           p.source_address, p.target_address, addendum);
 
     if constexpr (kLogLevel >= kLogPacketBytes) {
       printf("%s[ ", kIndent);
@@ -145,12 +144,13 @@ void ProtocolAgent::LogPacket(Packet<PacketType::kConnectionRequest> const &p,
 
 void ProtocolAgent::LogPacket(Packet<PacketType::kConnectionAccept> const &p,
                               [[maybe_unused]] std::span<const uint8_t> w_p,
-                              const char *action) const {
+                              const char *action, const char *addendum) const {
   if constexpr (kLogLevel >= kLogPacketMetadata) {
     const char *kIndent = "        ";
-    LogStr("%s Connection-Accept packet from 0x%08x\n"
-           "%s  session-id will be %u\n",
-           action, p.source_address, kIndent, p.session_id);
+    LogStr("%s Connection-Accept packet from 0x%08x to 0x%08x %s\n"
+           "%s  session-id will be %u",
+           action, p.source_address, p.target_address, addendum, kIndent,
+           p.session_id);
     // TODO log start-time & frequency
 
     if constexpr (kLogLevel >= kLogPacketBytes) {
@@ -193,7 +193,8 @@ void ProtocolAgent::ChangeState(ProtocolState new_state) {
   state_ = new_state;
 }
 
-std::pair<RadioInterface::Status, ReceiveBuffer> ProtocolAgent::ReceivePacket() {
+std::pair<RadioInterface::Status, ReceiveBuffer>
+ProtocolAgent::ReceivePacket() {
   ReceiveBuffer buff{};
   auto status = radio_.get().Receive(buff.span());
 
@@ -237,12 +238,13 @@ void ProtocolAgent::Seek() {
     }
     // TODO re-seek if we get a non-ad packet?
     auto maybe_ad = Deserialize<PacketType::kAdvertising>(w_p);
-    if (!maybe_ad) return false;
+    if (!maybe_ad)
+      return false;
     auto ad = maybe_ad.value();
 
     if constexpr (kLogLevel >= kLogPacketMetadata)
       LogPacket(ad, w_p.span(), "Received");
-    // TODO we should use their ID somewhere
+    advertiser_address_ = ad.source_address;
     return true;
   };
   bool got_packet = get_ad();
@@ -251,9 +253,12 @@ void ProtocolAgent::Seek() {
 }
 
 void ProtocolAgent::RequestConnection() {
+  assert(advertiser_address_.has_value());
+
   Packet<PacketType::kConnectionRequest> conn_req{};
   conn_req.source_address = address_;
-  conn_req.target_address = 0; // TODO plumb in target-addr
+  conn_req.target_address = *advertiser_address_;
+  advertiser_address_ = {};
 
   auto w_conn_req = Serialize(conn_req);
   auto status = radio_.get().Transmit(w_conn_req);
@@ -270,16 +275,21 @@ void ProtocolAgent::RequestConnection() {
       continue;
     }
     auto maybe_response = Deserialize<PacketType::kConnectionAccept>(w_p);
-    if (!maybe_response) continue;
+    if (!maybe_response)
+      continue;
     auto response = maybe_response.value();
 
-    if constexpr (kLogLevel > kNone)
-      LogPacket(response, w_p.span(), "Received");
-    // TODO confirm they're the party we expect
+    const bool is_for_us = (response.target_address == address_);
+    if constexpr (kLogLevel > kNone) {
+      const char *for_us_str = is_for_us ? "(for us)" : "(not for us)";
+      LogPacket(response, w_p.span(), "Received", for_us_str);
+    }
+    if (response.target_address != address_)
+      continue;
 
     TimePoint start_time(DeserializeWireTime(response.session_start_time));
-    session_.emplace(start_time, address_, kHardcodedTransmissionTime,
-                     kHardcodedSleepTime, false);
+    session_.emplace(start_time, response.session_id,
+                     kHardcodedTransmissionTime, kHardcodedSleepTime, false);
     // Success!
     ChangeState(ProtocolState::kExecuteSession);
     session_->SleepUntilStartTime();
@@ -309,12 +319,19 @@ void ProtocolAgent::Advertise() {
     if (status != RadioInterface::Status::kSuccess)
       continue;
     auto maybe_response = Deserialize<PacketType::kConnectionRequest>(w_p);
-    if (!maybe_response) continue;
+    if (!maybe_response)
+      continue;
 
-    // Success: got a fish!
     auto response = maybe_response.value();
-    if constexpr (kLogLevel > kNone)
-      LogPacket(response, w_p.span(), "Received");
+    const bool is_for_us = (response.target_address == address_);
+    if constexpr (kLogLevel > kNone) {
+      const char *for_us_str = is_for_us ? "(for us)" : "(not for us)";
+      LogPacket(response, w_p.span(), "Received", for_us_str);
+    }
+    if (response.target_address != address_)
+      continue;
+    // Success: got a fish!
+    requester_address_ = response.source_address;
     ChangeState(ProtocolState::kExecuteHandshakeFromAdvertise);
     return;
   } while (Now() - receive_begin < kConnectionRequestInterval);
@@ -324,11 +341,13 @@ void ProtocolAgent::Advertise() {
 }
 
 void ProtocolAgent::AcceptConnection() {
+  assert(requester_address_.has_value());
   Packet<PacketType::kConnectionAccept> accept{};
   accept.source_address = address_;
-  accept.target_address = 0;  // TODO pipe in target address
   accept.session_start_time = GetFutureWireTime(kHandshakeLeadTime);
-  accept.session_id = address_;  // TODO generate session IDs
+  accept.session_id = address_; // TODO generate session IDs
+  accept.target_address = *requester_address_;
+  requester_address_ = {};
 
   auto start_time = DeserializeWireTime(accept.session_start_time);
   session_.emplace(start_time, address_, kHardcodedTransmissionTime,

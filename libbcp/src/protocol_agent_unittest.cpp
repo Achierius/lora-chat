@@ -108,8 +108,8 @@ TEST(ActionOrdering, AdvertiseSuccess) {
 
   auto send_conreq = [](std::span<uint8_t> out) {
     Packet<PacketType::kConnectionRequest> request{};
-    request.source_address = 100;
-    request.target_address = 200;
+    request.source_address = 1;
+    request.target_address = 2;
 
     auto w_request = Serialize(request);
     assert(out.size_bytes() >= w_request.size());
@@ -118,7 +118,7 @@ TEST(ActionOrdering, AdvertiseSuccess) {
   };
   CountingRadio radio{true, send_conreq, std::chrono::milliseconds(50)};
   lora_chat::MessagePipe pipe{};
-  ProtocolAgent agent{0, radio, pipe};
+  ProtocolAgent agent{2, radio, pipe};
 
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
   agent.SetGoal(Goal::kAdvertiseConnection);
@@ -128,6 +128,41 @@ TEST(ActionOrdering, AdvertiseSuccess) {
   // Then we accept the request
   agent.ExecuteAgentAction();
   EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{1, 0}));
+
+  EXPECT_TRUE(agent.InSession());
+}
+
+TEST(ActionOrdering, AdvertiseUnrelatedReply) {
+  using lora_chat::ProtocolAgent;
+  using lora_chat::PacketType;
+  using lora_chat::Packet;
+  using Status = lora_chat::RadioInterface::Status;
+  using Goal = ProtocolAgent::ConnectionGoal;
+  using lora_chat::Serialize;
+
+  auto send_conreq = [](std::span<uint8_t> out) {
+    Packet<PacketType::kConnectionRequest> request{};
+    request.source_address = 1;
+    request.target_address = 2;
+
+    auto w_request = Serialize(request);
+    assert(out.size_bytes() >= w_request.size());
+    std::copy(w_request.begin(), w_request.end(), out.begin());
+    return Status::kSuccess;
+  };
+  CountingRadio radio{true, send_conreq, std::chrono::milliseconds(50)};
+  lora_chat::MessagePipe pipe{};
+  ProtocolAgent agent{3, radio, pipe};
+
+  EXPECT_EQ(radio.GetAndClearObservedActions(), (std::pair{0, 0}));
+  agent.SetGoal(Goal::kAdvertiseConnection);
+  // First we send an advert, and then receive a conreq right away
+  // But it should be for a different address, so we should ignore it
+  agent.ExecuteAgentAction();
+  // Then we "would" accept the request, if it were meant for us
+  agent.ExecuteAgentAction();
+
+  EXPECT_FALSE(agent.InSession());
 }
 
 TEST(ActionOrdering, SeekSuccess) {
