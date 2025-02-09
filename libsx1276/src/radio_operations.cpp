@@ -6,13 +6,14 @@
 #include <cassert>
 #include <cstdio>
 
-void sx1276::init_lora(int fd, sx1276::Frequency freq, sx1276::Bandwidth bw,
-    sx1276::CodingRate cr, sx1276::SpreadingFactor spreading_factor) {
+void sx1276::init_lora(int fd, sx1276::ChannelConfig config) {
   using RegAddr = sx1276::RegAddr;
   using OpMode = sx1276::OpMode;
 
-  assert(spreading_factor >= 6 && spreading_factor <= 12);
-  if (spreading_factor == 6) {
+  auto& [freq, bw, cr, sf] = config;
+
+  assert(sf >= 6 && sf <= 12);
+  if (sf == 6) {
     printf("Error: SF6, while legal, is special & requires work I haven't done yet.\n");
     exit(-1);
   }
@@ -124,7 +125,7 @@ void sx1276::init_lora(int fd, sx1276::Frequency freq, sx1276::Bandwidth bw,
     // Spreading factor & some other bits ig
     uint8_t rx_payload_crc = (0 << 2);
     uint8_t up_rx_symb_timeout = 1;
-    check(spi_write_byte(fd, RegAddr::kModemConfig2, (spreading_factor << 4) | rx_payload_crc | up_rx_symb_timeout));
+    check(spi_write_byte(fd, RegAddr::kModemConfig2, (sf << 4) | rx_payload_crc | up_rx_symb_timeout));
     fence(RegAddr::kModemConfig2);
   }
 }

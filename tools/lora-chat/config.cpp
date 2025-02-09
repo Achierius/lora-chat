@@ -17,10 +17,12 @@ constexpr sx1276::SpreadingFactor kDefaultSpreadingFactor{sx1276::SpreadingFacto
 
 Config prompt_user_for_config() {
   Config conf{
-      .frequency = kDefaultFrequency,
-      .bandwidth = kDefaultBandwidth,
-      .coding_rate = kDefaultCodingRate,
-      .spreading_factor = kDefaultSpreadingFactor,
+    .channel = sx1276::ChannelConfig {
+      .freq = kDefaultFrequency,
+      .bw = kDefaultBandwidth,
+      .cr = kDefaultCodingRate,
+      .sf = kDefaultSpreadingFactor,
+    },
   };
 
   // TODO use libfmt and make formatters for the struct types
@@ -29,8 +31,8 @@ Config prompt_user_for_config() {
          "\tbandwidth         %d\n"
          "\tcoding-rate       %d\n"
          "\tspreading-factor  %d\n",
-         conf.frequency, conf.bandwidth, conf.coding_rate,
-         conf.spreading_factor);
+         conf.channel.freq, conf.channel.bw,
+         conf.channel.cr, conf.channel.sf);
 
   return conf;
 }

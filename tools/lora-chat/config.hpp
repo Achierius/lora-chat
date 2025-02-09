@@ -3,10 +3,7 @@
 #include "sx1276/sx1276.hpp"
 
 struct Config {
-  sx1276::Frequency frequency;
-  sx1276::Bandwidth bandwidth;
-  sx1276::CodingRate coding_rate;
-  sx1276::SpreadingFactor spreading_factor;
+  sx1276::ChannelConfig channel;
 };
 
 // TODO use libfmt and specify print formats for the struct members

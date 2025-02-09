@@ -20,8 +20,7 @@ bool init_lora(Config const &cfg) {
 
   int fd = spi_init();
   lora_state = {fd, cfg};
-  sx1276::init_lora(fd, cfg.frequency, cfg.bandwidth, cfg.coding_rate,
-                    cfg.spreading_factor);
+  sx1276::init_lora(fd, cfg.channel);
 
   return true;
 }

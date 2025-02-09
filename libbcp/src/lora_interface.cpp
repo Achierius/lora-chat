@@ -3,10 +3,12 @@
 
 namespace lora_chat {
 
-constexpr sx1276::Frequency kLoraFrequency{0xe4c000};
-constexpr sx1276::Bandwidth kLoraBandwidth{sx1276::Bandwidth::k125kHz};
-constexpr sx1276::CodingRate kLoraCodingRate{sx1276::CodingRate::k4_7};
-constexpr sx1276::SpreadingFactor kLoraSpreadingFactor{9};
+constexpr sx1276::ChannelConfig kHardcodedLoraChannelConfig {
+  .freq = 0xe4c000,
+  .bw = sx1276::Bandwidth::k125kHz,
+  .cr = sx1276::CodingRate::k4_7,
+  .sf = sx1276::SpreadingFactor::kSF9,
+};
 
 RadioInterface::Status LoraInterface::Transmit(std::span<uint8_t const> buffer) {
   if (fd_ < 0) return Status::kInitializationFailed;
@@ -39,8 +41,7 @@ size_t LoraInterface::MaximumMessageLength() const {
 }
 
 LoraInterface::LoraInterface() : fd_{spi_init()} {
-  sx1276::init_lora(fd_, kLoraFrequency, kLoraBandwidth, kLoraCodingRate,
-                    kLoraSpreadingFactor);
+  sx1276::init_lora(fd_, kHardcodedLoraChannelConfig);
 }
 
 } // namespace lora_chat

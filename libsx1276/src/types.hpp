@@ -50,4 +50,11 @@ enum SpreadingFactor : uint8_t  {
 // TODO make proper types for this
 using Frequency = uint32_t;
 
+struct ChannelConfig {
+  Frequency freq;
+  Bandwidth bw;
+  CodingRate cr;
+  SpreadingFactor sf;
+};
+
 } // namespace sx1276
