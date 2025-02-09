@@ -5,10 +5,37 @@
 
 #include <cassert>
 #include <cstdio>
+#include <mutex>
+#include <unordered_map>
+
+namespace {
+using ConfigCacheT = std::unordered_map<int, sx1276::ChannelConfig>;
+ConfigCacheT* config_cache_storage;
+ConfigCacheT& config_cache() {
+  static std::once_flag once_flag;
+  std::call_once(once_flag, []() {
+  config_cache_storage = new ConfigCacheT();
+  });
+  return *config_cache_storage;
+}
+} // namespace
+
+bool sx1276::get_channel_config(int fd, ChannelConfig* config) {
+  if (config_cache().count(fd) == 0) return false;
+
+  *config = config_cache()[fd];
+  return true;
+}
 
 void sx1276::init_lora(int fd, sx1276::ChannelConfig config) {
   using RegAddr = sx1276::RegAddr;
   using OpMode = sx1276::OpMode;
+
+  if (config_cache().count(fd) > 0) {
+    // For now we keep it to one initialization per fd per process
+    printf("Error: multiple initializations for fd %d\n", fd);
+    exit(-1);
+  }
 
   auto& [freq, bw, cr, sf] = config;
 
@@ -128,6 +155,8 @@ void sx1276::init_lora(int fd, sx1276::ChannelConfig config) {
     check(spi_write_byte(fd, RegAddr::kModemConfig2, (sf << 4) | rx_payload_crc | up_rx_symb_timeout));
     fence(RegAddr::kModemConfig2);
   }
+
+  config_cache()[fd] = config;
 }
 
 void sx1276::lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int len) {

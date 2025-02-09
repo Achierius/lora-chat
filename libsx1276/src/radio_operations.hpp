@@ -7,6 +7,7 @@
 namespace sx1276 {
 
 void init_lora(int fd, ChannelConfig config);
+bool get_channel_config(int fd, ChannelConfig* config);
 
 // TODO propogate errors
 void lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int len);
