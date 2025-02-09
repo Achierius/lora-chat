@@ -69,7 +69,7 @@ void burst_read_from_spi_cmd(int fd, uint8_t addr, int len) {
 
 void hardcoded_init_for_transmit_cmd(int fd) {
   printf("Setting up device...\n");
-  sx1276::init_lora(fd, 0xe4c000, sx1276::Bandwidth::k125kHz, sx1276::CodingRate::k4_7, 9);
+  sx1276::init_lora(fd, 0xe4c000, sx1276::Bandwidth::k125kHz, sx1276::CodingRate::k4_7, sx1276::SpreadingFactor::kSF9);
   printf("Setup complete!\n");
 }
 

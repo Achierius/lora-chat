@@ -11,7 +11,7 @@ namespace {
 constexpr sx1276::Frequency kDefaultFrequency{0xe4c000};
 constexpr sx1276::Bandwidth kDefaultBandwidth{sx1276::Bandwidth::k125kHz};
 constexpr sx1276::CodingRate kDefaultCodingRate{sx1276::CodingRate::k4_7};
-constexpr sx1276::SpreadingFactor kDefaultSpreadingFactor{9};
+constexpr sx1276::SpreadingFactor kDefaultSpreadingFactor{sx1276::SpreadingFactor::kSF9};
 
 }; // namespace
 

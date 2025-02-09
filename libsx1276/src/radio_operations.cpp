@@ -6,8 +6,8 @@
 #include <cassert>
 #include <cstdio>
 
-void sx1276::init_lora(int fd, uint32_t freq, sx1276::Bandwidth bw,
-    sx1276::CodingRate cr, SpreadingFactor spreading_factor) {
+void sx1276::init_lora(int fd, sx1276::Frequency freq, sx1276::Bandwidth bw,
+    sx1276::CodingRate cr, sx1276::SpreadingFactor spreading_factor) {
   using RegAddr = sx1276::RegAddr;
   using OpMode = sx1276::OpMode;
 

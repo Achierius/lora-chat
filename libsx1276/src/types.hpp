@@ -36,8 +36,18 @@ enum CodingRate : uint8_t {
   k4_8 = 4,
 };
 
-// TODO make proper types for these
-using SpreadingFactor = uint32_t;
+enum SpreadingFactor : uint8_t  {
+  kUndefinedSpreadingFactor = 0,
+  kSF6 = 6,
+  kSF7 = 7,
+  kSF8 = 8,
+  kSF9 = 9,
+  kSF10 = 10,
+  kSF11 = 11,
+  kSF12 = 12,
+};
+
+// TODO make proper types for this
 using Frequency = uint32_t;
 
 } // namespace sx1276
