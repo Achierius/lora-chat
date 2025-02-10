@@ -15,11 +15,7 @@ RadioInterface::Status LoraInterface::Transmit(std::span<uint8_t const> buffer) 
   if (!buffer.size_bytes() || buffer.size_bytes() > SX127x_FIFO_CAPACITY)
     return Status::kBadBufferSize;
 
-  // yoinked from tools/lora-chat/lora_interface.cpp
-  // TODO TOA calculation should live inside the lora library
-  int time_on_air = 150 + (7 * buffer.size_bytes());
-
-  sx1276::lora_transmit(fd_, time_on_air, &buffer[0], buffer.size_bytes());
+  sx1276::lora_transmit(fd_, &buffer[0], buffer.size_bytes());
   return Status::kSuccess;
 }
 
@@ -28,10 +24,7 @@ RadioInterface::Status LoraInterface::Receive(std::span<uint8_t> buffer_out) {
   if (buffer_out.size_bytes() < SX127x_FIFO_CAPACITY)
     return Status::kBadBufferSize;
 
-  // TODO TOA calculation should live inside the lora library
-  constexpr int kTimeOnAir = 150 + (7 * SX127x_FIFO_CAPACITY);
-
-  bool success = sx1276::lora_receive_continuous(fd_, kTimeOnAir, &buffer_out[0], SX127x_FIFO_CAPACITY);
+  bool success = sx1276::lora_receive_continuous(fd_, &buffer_out[0], SX127x_FIFO_CAPACITY);
   // TODO should actually check for whether we got a timeout or something else
   return success ? Status::kSuccess : Status::kTimeout;
 }

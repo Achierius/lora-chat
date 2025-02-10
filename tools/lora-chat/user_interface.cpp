@@ -22,10 +22,9 @@ UserCommand get_and_parse_user_input() {
   if (input_buffer[0] == '$') {
     // receive
     int num_messages{0};
-    int wait_time_ms{0};
-    sscanf(input_buffer.data() + 1, "%d %d", &num_messages, &wait_time_ms);
+    sscanf(input_buffer.data() + 1, "%d", &num_messages);
     return UserCommand{
-        .as_receive_message = {num_messages, wait_time_ms},
+        .as_receive_message = {num_messages},
         .tag = UserCommandTag::kReceiveMessage,
     };
   } else {

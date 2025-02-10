@@ -21,4 +21,4 @@ enum class ReceiveStatus {
   kBadInput,
   kNoMessage,
 };
-std::pair<ReceiveStatus, std::optional<std::string>> lora_receive(int pend_time_ms);
+std::pair<ReceiveStatus, std::optional<std::string>> lora_receive();

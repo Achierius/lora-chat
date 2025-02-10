@@ -16,10 +16,9 @@ enum class UserCommandTag {
 };
 
 using TransmitMessagePayload = std::array<char, kMaxUserInputSize>;  // Message to send
-using TransmitIotaPayload = int; // number of messages to send
+using TransmitIotaPayload = int;  // number of messages to send
 // TODO use radio-facing gpio to detect reception and ditch the manual ToA spec
-using ReceiveMessagePayload = std::pair<int, int>;  // number of messages to
-                                                    // consume, milliseconds to pend
+using ReceiveMessagePayload = int;  // number of messages to recv
 
 // I could use std::variant but I really don't feel like
 // dealing with that today

@@ -2,7 +2,6 @@ From 2024-10-18:
     - Implement a dual advertise-seek mode
         - Add randomization to the dual advertise-seek mode to prevent overlap
     - Adjust the lora library to allow for different configuration settings (perhaps just meshtastic presets?)
-    - Do ToA computation inside libsx1276 (just hardcode functions per preset ^ ?)
     - Fix the 1-2 blank messages received at the start of each session
 From 2024-08-28:
     - Hide library internals behind opaque APIs

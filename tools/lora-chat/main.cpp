@@ -25,9 +25,9 @@ int handle_transmit_message(TransmitMessagePayload message) {
 }
 
 int handle_receive_message(ReceiveMessagePayload payload) {
-  printf("Receiving %d messages... \n", payload.first);
-  for (int i = 0; i < payload.first; i++) {
-    auto [status, msg] = lora_receive(payload.second);
+  printf("Receiving %d messages... \n", payload);
+  for (int i = 0; i < payload; i++) {
+    auto [status, msg] = lora_receive();
     switch (status) {
     case ReceiveStatus::kSuccess:
       printf("\"%s\"\n", msg->c_str());

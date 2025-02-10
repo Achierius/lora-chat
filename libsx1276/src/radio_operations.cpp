@@ -1,13 +1,17 @@
 #include "radio_operations.hpp"
-#include "spi_wrappers.hpp"
-
-#include <utility>
 
 #include <cassert>
 #include <cstdio>
 #include <mutex>
+#include <utility>
 #include <unordered_map>
 
+#include "radio_math.hpp"
+#include "spi_wrappers.hpp"
+
+constexpr bool verbose { false };
+
+// TODO move this to its own file?
 namespace {
 using ConfigCacheT = std::unordered_map<int, sx1276::ChannelConfig>;
 ConfigCacheT* config_cache_storage;
@@ -18,6 +22,13 @@ ConfigCacheT& config_cache() {
   });
   return *config_cache_storage;
 }
+
+uint32_t compute_time_on_air_ms_via_fd(int msg_bytes, int fd) {
+  assert(config_cache().count(fd) > 0);
+
+  return compute_time_on_air_ms(msg_bytes, config_cache()[fd]);
+}
+
 } // namespace
 
 bool sx1276::get_channel_config(int fd, ChannelConfig* config) {
@@ -105,11 +116,11 @@ void sx1276::init_lora(int fd, sx1276::ChannelConfig config) {
   // Setup preamble length, sync word
   {
     // 0x12 seems to be standard, but anything other than 0x34 should be OK?
-    check(spi_write_byte(fd, RegAddr::kSyncWord, 0x12));
+    check(spi_write_byte(fd, RegAddr::kSyncWord, sx1276::kSyncWordValue));
     fence(RegAddr::kSyncWord);
-    check(spi_write_byte(fd, RegAddr::kPreambleMsb, 0x00));
+    check(spi_write_byte(fd, RegAddr::kPreambleMsb, (sx1276::kPreambleLengthBytes >> 8) && 0xFF));
     fence(RegAddr::kPreambleMsb);
-    check(spi_write_byte(fd, RegAddr::kPreambleLsb, 0x08));
+    check(spi_write_byte(fd, RegAddr::kPreambleLsb, sx1276::kPreambleLengthBytes & 0xFF));
     fence(RegAddr::kPreambleLsb);
   }
   // Setup detection threashold/optimization
@@ -150,7 +161,7 @@ void sx1276::init_lora(int fd, sx1276::ChannelConfig config) {
     fence(RegAddr::kModemConfig1);
 
     // Spreading factor & some other bits ig
-    uint8_t rx_payload_crc = (0 << 2);
+    uint8_t rx_payload_crc = (kEnablePayloadCrc << 2);
     uint8_t up_rx_symb_timeout = 1;
     check(spi_write_byte(fd, RegAddr::kModemConfig2, (sf << 4) | rx_payload_crc | up_rx_symb_timeout));
     fence(RegAddr::kModemConfig2);
@@ -159,15 +170,12 @@ void sx1276::init_lora(int fd, sx1276::ChannelConfig config) {
   config_cache()[fd] = config;
 }
 
-void sx1276::lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int len) {
+void sx1276::lora_transmit(int fd, const uint8_t* msg, int len) {
   assert(len > 0);
   assert(len < 0xffff);
   assert(msg);
 
   using RegAddr = sx1276::RegAddr;
-
-  // TODO compute TOA from message length
-  uint64_t time_on_air_us = time_on_air_ms * 1000;
 
   // TODO error handle every single write :')
 
@@ -182,10 +190,14 @@ void sx1276::lora_transmit(int fd, int time_on_air_ms, const uint8_t* msg, int l
   spi_write_byte(fd, RegAddr::kFifoTxBaseAddr, 0x80);
   spi_write_byte(fd, RegAddr::kFifoAddrPtr, 0x80);
 
-  spi_write_burst(fd, RegAddr::kFifo, msg, len);
-  spi_write_byte(fd, RegAddr::kOpMode, 0x8b);
+  spi_write_burst(fd, RegAddr::kFifo, msg, len); // write msg to hw buffer
+  spi_write_byte(fd, RegAddr::kOpMode, 0x8b); // begin transmitting
+
+  auto time_on_air_us = compute_time_on_air_ms_via_fd(len, fd) * 1000;
+  if (verbose)
+    printf("lora_transmit: ToA  %u, now is %u\n", 150 + 7*len, time_on_air_us / 1000);
   usleep(time_on_air_us);
-  spi_write_byte(fd, RegAddr::kOpMode, 0x89);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x89); // end transmitting
 }
 
 namespace {
@@ -207,11 +219,13 @@ bool lora_receive_common_setup(int fd) {
 }
 
 bool copy_received_message(int fd, uint8_t* dest, int max_len) {
+  assert(max_len >= 0);
   using RegAddr = sx1276::RegAddr;
 
   size_t payload_len { spi_read_byte(fd, RegAddr::kRxNumBytes).second };
-  printf("received payload of length %lu: ", payload_len);
-  if (payload_len > max_len) {
+  if (verbose)
+    printf("received payload of length %lu: ", payload_len);
+  if (payload_len > static_cast<size_t>(max_len)) {
     printf("warning: payload len %lu exceeded buffer size %d -- truncating\n", payload_len, max_len);
     payload_len = max_len;
   }
@@ -230,7 +244,7 @@ bool copy_received_message(int fd, uint8_t* dest, int max_len) {
 }
 } // namespace
 
-bool sx1276::lora_receive_continuous(int fd, int time_on_air_ms, uint8_t* dest, int max_len) {
+bool sx1276::lora_receive_continuous(int fd, uint8_t* dest, int max_len) {
   assert(max_len);
   assert(dest);
   using RegAddr = sx1276::RegAddr;
@@ -252,9 +266,12 @@ bool sx1276::lora_receive_continuous(int fd, int time_on_air_ms, uint8_t* dest, 
   uint8_t irq_mask { spi_read_byte(fd, RegAddr::kIrqFlagsMask).second };
   spi_write_byte(fd, RegAddr::kIrqFlagsMask, irq_mask | 0x40); // lol
 
-  spi_write_byte(fd, RegAddr::kOpMode, 0x8d);
-  usleep(time_on_air_ms * 1000);
-  spi_write_byte(fd, RegAddr::kOpMode, 0x89);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x8d); // begin receiving
+  auto time_on_air_us = compute_time_on_air_ms_via_fd(max_len, fd) * 1000;
+  if (verbose)
+    printf("lora_receive_continuous: ToA %ums\n", time_on_air_us / 1000);
+  usleep(time_on_air_us);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x89); // stop receiving
 
   spi_write_byte(fd, RegAddr::kIrqFlagsMask, irq_mask); // restore prior state
   uint8_t irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
@@ -276,7 +293,7 @@ bool sx1276::lora_receive_continuous(int fd, int time_on_air_ms, uint8_t* dest, 
   return true;
 }
 
-bool sx1276::lora_receive_single(int fd, int time_on_air_ms, uint8_t* dest, int max_len) {
+bool sx1276::lora_receive_single(int fd, uint8_t* dest, int max_len) {
   assert(max_len);
   assert(dest);
   using RegAddr = sx1276::RegAddr;
@@ -288,9 +305,12 @@ bool sx1276::lora_receive_single(int fd, int time_on_air_ms, uint8_t* dest, int 
 
   // TODO set timeout regs according to time_on_air_ms
 
-  spi_write_byte(fd, RegAddr::kOpMode, 0x8e);
-  usleep(time_on_air_ms * 1000);
-  spi_write_byte(fd, RegAddr::kOpMode, 0x89);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x8e); // start transmitting
+  auto time_on_air_us = compute_time_on_air_ms_via_fd(max_len, fd) * 1000;
+  if (verbose)
+    printf("lora_receive_single: ToA %ums\n", time_on_air_us / 1000);
+  usleep(time_on_air_us);
+  spi_write_byte(fd, RegAddr::kOpMode, 0x89); // start receiving
 
   // TODO what's wrong with my bitfield man
   //sx1276::IrqFlags irqs { spi_read_byte(fd, RegAddr::kIrqFlags).second };
